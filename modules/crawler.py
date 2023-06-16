@@ -8,11 +8,11 @@ from modules.utilities import request_get, extract_vul_obj_offset_and_size, regx
 from bs4 import BeautifulSoup
 from bs4 import element
 
-syzbot_bug_base_url = "bug?id="
-syzbot_bug_ext_url = "bug?extid="
 syzbot_host_url = "https://syzkaller.appspot.com/"
 num_of_elements = 8
 
+syzbot_bug_base_url = "bug?id="
+syzbot_bug_ext_url = "bug?extid="
 supports = {
   0:syzbot_bug_base_url,
   1:syzbot_bug_ext_url
@@ -21,33 +21,15 @@ supports = {
 class Crawler:
   def __init__(self,
               url="https://syzkaller.appspot.com/",
-              keyword=[''],
-              max_retrieve=10,
-              deduplicate=[''],
-              ignore_batch=[],
-              filter_by_reported=-1, 
-              filter_by_closed=-1,
-              include_high_risk=False,
               debug=False):
+  
     self.url = url
-    if type(keyword) == list:
-      self.keyword = keyword
-    else:
-      print("keyword must be a list")
-    if type(deduplicate) == list:
-      self.deduplicate = deduplicate
-    else:
-      print("deduplication keyword must be a list")
-    self.ignore_batch = ignore_batch
-    self.max_retrieve = max_retrieve
     self.cases = {}
     self.patches = {}
     self.logger = None
     self.logger2file = None
-    self.include_high_risk = include_high_risk
     self.init_logger(debug)
-    self.filter_by_reported = filter_by_reported
-    self.filter_by_closed = filter_by_closed
+    print(debug)
 
   def init_logger(self, debug):
     handler = logging.FileHandler("{}/info".format(os.getcwd()))
@@ -67,46 +49,27 @@ class Crawler:
       self.logger2file.propagate = False
     self.logger2file.addHandler(handler)
 
-  def run(self):
-    if len(self.ignore_batch) > 0:
-      for hash_val in self.ignore_batch:
-        patch_url = self.get_patch_of_case(hash_val)
-        if patch_url == None:
-          continue
-        commit = regx_get(r"https:\/\/git\.kernel\.org\/pub\/scm\/linux\/kernel\/git\/torvalds\/linux\.git\/commit\/\?id=(\w+)", patch_url, 0)
-        if commit in self.patches:
-          continue
-        self.patches[commit] = True
-      print("Ignore {} patches".format(len(self.patches)))
-    cases_hash, high_risk_impacts = self.gather_cases()
-    for each in cases_hash:
-      if 'Patch' in each:
-        patch_url = each['Patch']
-        commit = regx_get(r"https:\/\/git\.kernel\.org\/pub\/scm\/linux\/kernel\/git\/torvalds\/linux\.git\/commit\/\?id=(\w+)", patch_url, 0)
-        if commit in self.patches or (commit in high_risk_impacts and not self.include_high_risk):
-          continue
-        self.patches[commit] = True
-      if self.retreive_case(each['Hash']) != -1:
-        self.cases[each['Hash']]['title'] = each['Title']
-        if 'Patch' in each:
-          self.cases[each['Hash']]['patch'] = each['Patch']
-    return
-
-  def run_one_case(self, hash):
+  def run_one_case(self, hash, flag):
     self.logger.info("retreive one case: %s",hash)
-    if self.retreive_case(hash) == -1:
+    try:
+      bug_url = supports[flag]
+      self.logger.debug("{}{}{}".format(syzbot_host_url, bug_url, hash))
+      url = syzbot_host_url + bug_url + hash
+    except IndexError:
+      print("url not support")
+
+    if self.retreive_case(url, hash) == -1:
       return
-    self.cases[hash]['title'] = self.get_title_of_case(hash)
-    patch = self.get_patch_of_case(hash)
+    self.cases[hash]['title'] = self.get_title_of_case(url, hash)
+    patch = self.get_patch_of_case(url, hash)
     if patch != None:
       self.cases[hash]['patch'] = patch
 
-  def get_title_of_case(self, hash=None, text=None):
+  def get_title_of_case(self, url, hash=None, text=None):
     if hash==None and text==None:
       self.logger.info("No case given")
       return None
     if hash!=None:
-      url = syzbot_host_url + syzbot_bug_base_url + hash
       req = requests.request(method='GET', url=url)
       soup = BeautifulSoup(req.text, "html.parser")
     else:
@@ -114,9 +77,8 @@ class Crawler:
     title = soup.body.b.contents[0]
     return title
   
-  def get_patch_of_case(self, hash):
+  def get_patch_of_case(self, url, hash):
     patch = None
-    url = syzbot_host_url + syzbot_bug_base_url + hash
     req = requests.request(method='GET', url=url)
     soup = BeautifulSoup(req.text, "html.parser")
     mono = soup.find("span", {"class": "mono"})
@@ -128,12 +90,12 @@ class Crawler:
       pass 
     return patch
 
-  def retreive_case(self, hash):
+  def retreive_case(self, url, hash):
     self.cases[hash] = {}
-    detail = self.request_detail(hash)
+    detail = self.request_detail(url)
     print(detail)
     if len(detail) < num_of_elements:
-      self.logger.error("Failed to get detail of a case {}{}{}".format(syzbot_host_url, syzbot_bug_base_url, hash))
+      self.logger.error("Failed to get detail of a case {}".format(url))
       self.cases.pop(hash)
       return -1
     self.cases[hash]["kernel"] = detail[0]
@@ -149,82 +111,11 @@ class Crawler:
     self.cases[hash]["vul_offset"] = detail[10]
     self.cases[hash]["obj_size"] = detail[11]
 
-  def gather_cases(self):
-      high_risk_impacts = {}
-      res = []
-      tables = self.__get_table(self.url)
-      if tables == []:
-          self.logger.error("error occur in gather_cases")
-          return res, high_risk_impacts
-      count = 0
-      for table in tables:
-          #self.logger.info("table caption {}".format(table.caption.text))
-          for case in table.tbody.contents:
-              if type(case) == element.Tag:
-                  title = case.find('td', {"class": "title"})
-                  if title == None:
-                      continue
-                  for keyword in self.deduplicate:
-                      if keyword in title.text:
-                          try:
-                              commit = regx_get(r"https:\/\/git\.kernel\.org\/pub\/scm\/linux\/kernel\/git\/torvalds\/linux\.git\/commit\/\?id=(\w+)", patch_url, 0)
-                              if commit in self.patches or \
-                                  (commit in high_risk_impacts and not self.include_high_risk):
-                                  continue
-                              self.patches[commit] = True
-                          except:
-                              pass
-                  for keyword in self.keyword:
-                      if 'out-of-bounds write' in title.text or \
-                              'use-after-free write' in title.text:
-                          commit_list = case.find('td', {"class": "commit_list"})
-                          try:
-                              patch_url = commit_list.contents[1].contents[1].attrs['href']
-                              high_risk_impacts[patch_url] = True
-                          except:
-                              pass
-                      if keyword in title.text or keyword=='':
-                          crash = {}
-                          commit_list = case.find('td', {"class": "commit_list"})
-                          crash['Title'] = title.text
-                          stats = case.find_all('td', {"class": "stat"})
-                          crash['Repro'] = stats[0].text
-                          crash['Bisected'] = stats[1].text
-                          crash['Count'] = stats[2].text
-                          crash['Last'] = stats[3].text
-                          try:
-                              crash['Reported'] = stats[4].text
-                              if self.filter_by_reported > -1 and int(crash['Reported'][:-1]) > self.filter_by_reported:
-                                  continue
-                              patch_url = commit_list.contents[1].contents[1].attrs['href']
-                              crash['Patch'] = patch_url
-                              crash['Closed'] = stats[4].text
-                              if self.filter_by_closed > -1 and int(crash['Closed'][:-1]) > self.filter_by_closed:
-                                  continue
-                          except:
-                              # patch only works on fixed cases
-                              pass
-                          self.logger.debug("[{}] Find a suitable case: {}".format(count, title.text))
-                          for _ in range(0, 3):
-                              try:
-                                  ele = title.next
-                                  href = ele.attrs['href']
-                                  break
-                              except AttributeError:
-                                  title = title.next
-                          hash_val = href[8:]
-                          self.logger.debug("[{}] Fetch {}".format(count, hash_val))
-                          crash['Hash'] = hash_val
-                          res.append(crash)
-                          count += 1
-                          break
-                  if count == self.max_retrieve:
-                      break
-      return res, high_risk_impacts
-
-  def request_detail(self, hash, index=1):
-    self.logger.debug("{}{}{}".format(syzbot_host_url, syzbot_bug_base_url, hash))
-    url = syzbot_host_url + syzbot_bug_base_url + hash
+  def request_detail(self, url, index=1):
+    """
+    index 默认的值是1 也就是获取第一个的配置来build
+    """
+    print(url)
     tables = self.__get_table(url)
     if tables == []:
       print("error occur in request_detail: {}".format(hash))
@@ -279,8 +170,6 @@ class Crawler:
                 self.logger.debug("Testcase URL: {}".format(syz_repro))
               except:
                 self.logger.info("Repro is missing. Failed to retrieve case {}{}{}".format(syzbot_host_url, syzbot_bug_base_url, hash))
-                # self.logger2file.info("[Failed] {} Repro is missing".format(url))
-                # break
                 syz_repro = None
               try:
                 c_repro = syzbot_host_url + repros[3].next.attrs['href']
@@ -291,6 +180,7 @@ class Crawler:
             except:
               self.logger.info("Failed to retrieve case {}{}{}".format(syzbot_host_url, syzbot_bug_base_url, hash))
               continue
+            self.logger.info("get table ")
             return [kernel, commit, syzkaller, config, syz_repro, log, c_repro, time_str, manager_str, report, offset, size]
         break
     self.logger2file.info("[Failed] {} fail to find a proper crash".format(url))

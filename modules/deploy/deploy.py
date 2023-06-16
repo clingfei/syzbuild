@@ -1,8 +1,9 @@
 from math import trunc
 import re
 import os
-from modules.deploy.case import Case
+import sys
 import requests
+import datetime
 import shutil
 import logging
 
@@ -11,7 +12,8 @@ from modules.utilities import chmodX
 from modules.crawler import syzbot_host_url, syzbot_bug_base_url
 from subprocess import call, Popen, PIPE, STDOUT
 from dateutil import parser as time_parser
-from .worker import Workers
+
+import ipdb
 
 syz_config_template="""
 {{ 
@@ -39,73 +41,83 @@ syz_config_template="""
   ]
 }}"""
 
-class Deployer(Workers):
-  def __init__(self, index, parallel_max, debug=False, force=False, port=53777, replay='incomplete', linux_index=-1, time=8, kernel_fuzzing=False, reproduce=False, alert=[], static_analysis=False, symbolic_execution=False, gdb_port=1235, qemu_monitor_port=9700, max_compiling_kernel=-1, timeout_dynamic_validation=None, timeout_static_analysis=None, timeout_symbolic_execution=None, guided=False, be_bully=False, se_poc=None):
-    Workers.__init__(self, index, parallel_max, debug, force, port, replay, linux_index, time, kernel_fuzzing, reproduce, alert, static_analysis, symbolic_execution, gdb_port, qemu_monitor_port, max_compiling_kernel, timeout_dynamic_validation, timeout_static_analysis, timeout_symbolic_execution, guided, be_bully, se_poc)
-    self.clone_linux()
+class Deployer():
+  def __init__(self, index=0, debug=False, force=False):
+    self.index= index
+    self.debug = debug
+    self.force= force
+    self.image_switching_date = datetime.datetime(2020, 3, 15)
+    self.catalog = 'incomplete'
+    self.linux_addr = ""
+    # TODO: 这里默认用8个核心去编译内核
+    self.max_compiling_kernel = 8
+
+  def init_logger(self, debug, hash_val=None):
+    self.logger = logging.getLogger(__name__+str(self.index))
+    for each in self.logger.handlers:
+      self.logger.removeHandler(each)
+    handler = logging.StreamHandler(sys.stdout)
+    if hash_val != None:
+      format = logging.Formatter('%(asctime)s Thread {}: {} %(message)s'.format(self.index, hash_val))
+    else:
+      format = logging.Formatter('%(asctime)s Thread {}: %(message)s'.format(self.index))
+    handler.setFormatter(format)
+    self.logger.addHandler(handler)
+    if debug:
+      self.logger.setLevel(logging.DEBUG)
+      self.logger.propagate = True
+    else:
+      self.logger.setLevel(logging.INFO)
+      self.logger.propagate = False
   
-  def init_replay_crash(self, hash_val):
-    chmodX("syzscope/scripts/init-replay.sh")
-    self.logger.info("run: scripts/init-replay.sh {} {}".format(self.catalog, hash_val))
-    call(["syzscope/scripts/init-replay.sh", self.catalog, hash_val])
+  def setup_hash(self, hash_val):
+    self.hash_val = hash_val
+    self.init_logger(self.debug, self.hash_val[:7])
 
   def deploy(self, hash_val, case):
     self.setup_hash(hash_val)
     self.project_path = os.getcwd()
-    self.package_path = os.path.join(self.project_path, "syzscope")
+    self.package_path = os.path.join(self.project_path)
     self.current_case_path = "{}/work/{}/{}".format(self.project_path, self.catalog, hash_val[:7])
     self.image_path = "{}/img".format(self.current_case_path)
     self.syzkaller_path = "{}/gopath/src/github.com/google/syzkaller".format(self.current_case_path)
     self.kernel_path = "{}/linux".format(self.current_case_path)
-    self.arch = "amd64"
     if utilities.regx_match(r'386', case["manager"]):
       self.arch = "386"
+    elif utilities.regx_match(r'amd64', case["manager"]):
+      self.arch = "amd64"
+    else:
+      print("arch must be i386/amd64")
+      self.arch = "amd64"
+      # TODO: 有些确实是其他架构的需要区别出来，不过一般人眼先看看
+      # exit(-1)
+
     self.logger.info(hash_val)
 
-    if self.replay:
-      self.init_replay_crash(hash_val[:7])    
     self.compiler = utilities.set_compiler_version(time_parser.parse(case["time"]), case["config"])
     impact_without_mutating = False
     succeed = self.__create_dir_for_case()
     if self.force:
       self.cleanup_built_kernel(hash_val)
       self.cleanup_built_syzkaller(hash_val)
-      if self.kernel_fuzzing:
-        self.cleanup_reproduced_ori_poc(hash_val)
-        self.cleanup_finished_fuzzing(hash_val)
-      if self.reproduce_ori_bug:
-        self.cleanup_reproduced_ori_poc(hash_val)
-      if self.symbolic_execution:
-        self.cleanup_finished_symbolic_execution(hash_val)
-      if self.static_analysis:
-        self.cleanup_finished_static_analysis(hash_val)
     self.case_logger = self.__init_case_logger("{}-log".format(hash_val))
     self.case_info_logger = self.__init_case_logger("{}-info".format(hash_val))
-    url = syzbot_host_url + syzbot_bug_base_url + hash_val
-    self.case_info_logger.info(url)
-    self.case_info_logger.info("pid: {}".format(os.getpid()))
+
+    # url = syzbot_host_url + syzbot_bug_base_url + hash_val
+    # self.case_info_logger.info(url)
+    # self.case_info_logger.info("pid: {}".format(os.getpid()))
 
     i386 = None
     if utilities.regx_match(r'386', case["manager"]):
       i386 = True
     
-    #if 'use-after-free' in case['title'] or 'out-of-bounds' in case['title']:
-    #    self.store_read = False
-    # self.init_crash_checker(self.ssh_port)
-
-    # need_patch = 0
-    # if not self.kernel_fuzzing and not self.reproduce_ori_bug:
-    #   contexts = self.get_buggy_contexts(case)
-    #   valid = 0
-    #   for context in contexts:
-    #     if context['offset'] != None and context['size'] != None and \
-    #       ((context['type'] == utilities.CASE and os.path.exists(context['repro'])) or\
-    #       (context['type'] == utilities.URL and context['repro'] != None)):
-    #         valid = 1
-    #   if not valid:
-    #     self.logger.info("No valid offset or size")
-    #     self.__move_to_completed()
-    #     return
+    self.linux_addr = case['kernel']
+    # TODO: 这里直接clone新的linux，不做复用
+    self.linux_folder = self.kernel_path
+    if os.path.exists(self.linux_folder):
+      print("linux cloned folder existed!\n") 
+    else:
+      self.clone_linux()
 
     r = self.__run_delopy_script(hash_val[:7], case)
     if r != 0:
@@ -135,52 +147,12 @@ class Deployer(Workers):
         #self.remove_gopath(os.path.join(self.current_case_path, "poc"))
         is_error = self.save_case(hash_val, 0, case, False, impact_without_mutating, title=title)
 
-    if is_error:
-      return
-    if self.__success_check(hash_val, "ConfirmedDoubleFree") or \
-      self.__success_check(hash_val, "ConfirmedAbnormallyMemWrite"):
-      succeed = True
-    valid_contexts = self.get_buggy_contexts(case)
-    if len(valid_contexts) == 0:
-      self.logger.info("No valid buggy context")
-    for context in valid_contexts:
-      if context['offset'] == None or context['size'] == None or \
-            ((context['type'] == utilities.CASE and not os.path.exists(context['repro'])) or\
-            (context['type'] == utilities.URL and context['repro'] == None)):
-        title = context['title']
-        self.case_logger.info("skip an invalid context")
-        continue
-
-      self.logger.info("Dynamic validate {}".format(context['workdir']))
-      if self.static_analysis:
-        if not self.finished_static_analysis(hash_val, 'incomplete'):
-          try:
-            self.do_static_analysis(case, context)
-            self.logger.info("static analysis finished")
-          except CompilingError:
-            self.logger.error("Encounter an error when doing static analysis")
-        else:
-          self.logger.info("{} has finished static analysis".format(hash_val[:7]))
-
-      if self.symbolic_execution:
-        if not self.finished_symbolic_execution(hash_val, 'incomplete'):
-          r = self.do_symbolic_execution(case, context, i386, max_round=5)
-          if r == 0:
-            succeed = True
-        else:
-          self.logger.info("{} has finished symbolic execution".format(hash_val[:7]))
-
-    if self.static_analysis:
-        self.create_finished_static_analysis_stamp()
-    if self.symbolic_execution:
-        self.create_finished_symbolic_execution_stamp()
-
     if succeed:
-        self.__move_to_succeed(0)
+      self.__move_to_succeed(0)
     elif is_error:
-        self.__save_error(hash_val)
+      self.__save_error(hash_val)
     else:
-        self.__move_to_completed()
+      self.__move_to_completed()
     
     return self.index
 
@@ -188,105 +160,105 @@ class Deployer(Workers):
     self.__run_linux_clone_script()
 
   def run_syzkaller(self, hash_val, limitedMutation):
-      self.logger.info("run syzkaller".format(self.index))
-      syzkaller = os.path.join(self.syzkaller_path, "bin/syz-manager")
-      exitcode = 4
-      # First round, we only enable limited syscalls.
-      # If failed to trigger a write crash, we enable more syscalls to run it again
-      for _ in range(0, 3):
-          if self.logger.level == logging.DEBUG:
-              p = Popen([syzkaller, "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), "-debug", "-poc"],
+    self.logger.info("run syzkaller".format(self.index))
+    syzkaller = os.path.join(self.syzkaller_path, "bin/syz-manager")
+    exitcode = 4
+    # First round, we only enable limited syscalls.
+    # If failed to trigger a write crash, we enable more syscalls to run it again
+    for _ in range(0, 3):
+      if self.logger.level == logging.DEBUG:
+          p = Popen([syzkaller, "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), "-debug", "-poc"],
+              stdout=PIPE,
+              stderr=STDOUT
+              )
+          with p.stdout:
+              self.__log_subprocess_output(p.stdout, logging.INFO)
+          exitcode = p.wait()
+
+          if not limitedMutation:
+              p = Popen([syzkaller, "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7]), "-debug"],
                   stdout=PIPE,
                   stderr=STDOUT
                   )
               with p.stdout:
                   self.__log_subprocess_output(p.stdout, logging.INFO)
-              exitcode = p.wait()
+          exitcode = p.wait()
+      else:
+          p = Popen([syzkaller, "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), "-poc"],
+              stdout = PIPE,
+              stderr = STDOUT
+              )
+          with p.stdout:
+              self.__log_subprocess_output(p.stdout, logging.INFO)
+          exitcode = p.wait()
 
-              if not limitedMutation:
-                  p = Popen([syzkaller, "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7]), "-debug"],
-                      stdout=PIPE,
-                      stderr=STDOUT
-                      )
-                  with p.stdout:
-                      self.__log_subprocess_output(p.stdout, logging.INFO)
-              exitcode = p.wait()
-          else:
-              p = Popen([syzkaller, "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), "-poc"],
+          if not limitedMutation:
+              p = Popen([syzkaller, "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7])],
                   stdout = PIPE,
                   stderr = STDOUT
                   )
               with p.stdout:
                   self.__log_subprocess_output(p.stdout, logging.INFO)
-              exitcode = p.wait()
-
-              if not limitedMutation:
-                  p = Popen([syzkaller, "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7])],
-                      stdout = PIPE,
-                      stderr = STDOUT
-                      )
-                  with p.stdout:
-                      self.__log_subprocess_output(p.stdout, logging.INFO)
-              exitcode = p.wait()
-          if exitcode != 4:
-              break
-      self.logger.info("syzkaller is done with exitcode {}".format(exitcode))
-      if exitcode == 3:
-          #Failed to parse the testcase
-          if self.correctTemplate() and self.compileTemplate():
-              exitcode = self.run_syzkaller(hash_val, limitedMutation)
-      return exitcode
+          exitcode = p.wait()
+      if exitcode != 4:
+          break
+    self.logger.info("syzkaller is done with exitcode {}".format(exitcode))
+    if exitcode == 3:
+      #Failed to parse the testcase
+      if self.correctTemplate() and self.compileTemplate():
+        exitcode = self.run_syzkaller(hash_val, limitedMutation)
+    return exitcode
   
   def compileTemplate(self):
-      target = os.path.join(self.package_path, "scripts/syz-compile.sh")
-      chmodX(target)
-      self.logger.info("run: scripts/syz-compile.sh")
-      p = Popen([target, self.current_case_path ,self.arch],
-              stdout=PIPE,
-              stderr=STDOUT
-              )
-      with p.stdout:
-          self.__log_subprocess_output(p.stdout, logging.INFO)
-      exitcode = p.wait()
-      self.logger.info("script/syz-compile.sh is done with exitcode {}".format(exitcode))
-      return exitcode == 0
+    target = os.path.join(self.package_path, "scripts/syz-compile.sh")
+    chmodX(target)
+    self.logger.info("run: scripts/syz-compile.sh")
+    p = Popen([target, self.current_case_path ,self.arch],
+            stdout=PIPE,
+            stderr=STDOUT
+            )
+    with p.stdout:
+      self.__log_subprocess_output(p.stdout, logging.INFO)
+    exitcode = p.wait()
+    self.logger.info("script/syz-compile.sh is done with exitcode {}".format(exitcode))
+    return exitcode == 0
   
   def correctTemplate(self):
-      find_it = False
-      pattern_type = utilities.SYSCALL
-      text = ''
-      pattern = ''
-      try:
-          path = os.path.join(self.syzkaller_path, 'CorrectTemplate')
-          f = open(path, 'r')
-          text = f.readline()
-          if len(text) == 0:
-              self.logger.info("Error: CorrectTemplate is empty")
-              return find_it
-      except:
-          return find_it
-      
-      if text.find('syscall:') != -1:
-          pattern = text.split(':')[1]
-          pattern_type = utilities.SYSCALL
-          pattern = pattern + "\("
-      if text.find('arg:') != -1:
-          pattern = text.split(':')[1]
-          pattern_type = utilities.STRUCT
-          i = pattern.find('[')
-          if i != -1:
-              pattern = "type " + pattern[:i]
-          else:
-              pattern = pattern + " {"
-      
-      search_path="sys/linux"
-      extension=".txt"
-      ori_syzkaller_path = os.path.join(self.current_case_path, "poc/gopath/src/github.com/google/syzkaller")
-      regx_pattern = "^"+pattern
-      src = os.path.join(ori_syzkaller_path, search_path)
-      dst = os.path.join(self.syzkaller_path, search_path)
-      find_it = self.syncFilesByPattern(regx_pattern, pattern_type, src, dst, extension)
-      return find_it
+    find_it = False
+    pattern_type = utilities.SYSCALL
+    text = ''
+    pattern = ''
+    try:
+        path = os.path.join(self.syzkaller_path, 'CorrectTemplate')
+        f = open(path, 'r')
+        text = f.readline()
+        if len(text) == 0:
+            self.logger.info("Error: CorrectTemplate is empty")
+            return find_it
+    except:
+        return find_it
+    
+    if text.find('syscall:') != -1:
+        pattern = text.split(':')[1]
+        pattern_type = utilities.SYSCALL
+        pattern = pattern + "\("
+    if text.find('arg:') != -1:
+        pattern = text.split(':')[1]
+        pattern_type = utilities.STRUCT
+        i = pattern.find('[')
+        if i != -1:
+            pattern = "type " + pattern[:i]
+        else:
+            pattern = pattern + " {"
+    
+    search_path="sys/linux"
+    extension=".txt"
+    ori_syzkaller_path = os.path.join(self.current_case_path, "poc/gopath/src/github.com/google/syzkaller")
+    regx_pattern = "^"+pattern
+    src = os.path.join(ori_syzkaller_path, search_path)
+    dst = os.path.join(self.syzkaller_path, search_path)
+    find_it = self.syncFilesByPattern(regx_pattern, pattern_type, src, dst, extension)
+    return find_it
 
   def syncFilesByPattern(self, pattern, pattern_type, src, dst, ends):
       find_it = False
@@ -403,11 +375,11 @@ class Deployer(Workers):
       return res
 
   def extractStruct(self, text):
-      trivial_type = ["int8", "int16", "int32", "int64", "int16be", "int32be", "int64be", "intptr",
-                      "in", "out", "inout", "dec", "hex", "oct", "fmt", "string", "target", 
-                      "x86_real", "x86_16", "x86_32", "x86_64", "arm64", "text", "proc", "ptr", "ptr64",
-                      "inet", "pseudo", "csum", "vma", "vma64", "flags", "const", "array", "void"
-                      "len", "bytesize", "bytesize2", "bytesize4", "bytesize8", "bitsize", "offsetof"]
+    trivial_type = ["int8", "int16", "int32", "int64", "int16be", "int32be", "int64be", "intptr",
+                    "in", "out", "inout", "dec", "hex", "oct", "fmt", "string", "target", 
+                    "x86_real", "x86_16", "x86_32", "x86_64", "arm64", "text", "proc", "ptr", "ptr64",
+                    "inet", "pseudo", "csum", "vma", "vma64", "flags", "const", "array", "void"
+                    "len", "bytesize", "bytesize2", "bytesize4", "bytesize8", "bitsize", "offsetof"]
   
   def confirmSuccess(self, hash_val, case, limitedMutation=False):
       syz_repro = case["syz_repro"]
@@ -447,50 +419,50 @@ class Deployer(Workers):
       return []
   
   def deduplicate_ori(self, paths, ori_prog):
-      res = []
-      for each in paths:
-          prog = os.path.join(each, "repro.prog")
-          if not os.path.exists(prog):
-              continue
-          f = open(prog, "r")
-          text = f.readlines()
-          prog_text1 = self.__distill_testcase(''.join(text))
-          req = utilities.request_get(ori_prog)
-          text = req.text
-          prog_text2 = self.__distill_testcase(''.join(text))
-          if prog_text1 == prog_text2:
-              continue
-          res.append(each)
-      return res
+    res = []
+    for each in paths:
+      prog = os.path.join(each, "repro.prog")
+      if not os.path.exists(prog):
+        continue
+      f = open(prog, "r")
+      text = f.readlines()
+      prog_text1 = self.__distill_testcase(''.join(text))
+      req = utilities.request_get(ori_prog)
+      text = req.text
+      prog_text2 = self.__distill_testcase(''.join(text))
+      if prog_text1 == prog_text2:
+        continue
+      res.append(each)
+    return res
   
   def repro_on_fixed_kernel(self, hash_val, case, crashes_path=None, limitedMutation=False):
-      syz_repro = case["syz_repro"]
-      syz_commit = case["syzkaller"]
-      commit = case["commit"]
-      config = case["config"]
-      c_repro = case["c_repro"]
-      i386 = None
-      res = []
-      if utilities.regx_match(r'386', case["manager"]):
-          i386 = True
-      commit = utilities.get_patch_commit(hash_val)
-      if commit != None:
-          res = self.crash_checker.repro_on_fixed_kernel(syz_commit, case["commit"], config, c_repro, i386, commit, crashes_path=crashes_path, limitedMutation=limitedMutation)
-      return res
+    syz_repro = case["syz_repro"]
+    syz_commit = case["syzkaller"]
+    commit = case["commit"]
+    config = case["config"]
+    c_repro = case["c_repro"]
+    i386 = None
+    res = []
+    if utilities.regx_match(r'386', case["manager"]):
+      i386 = True
+    commit = utilities.get_patch_commit(hash_val)
+    if commit != None:
+      res = self.crash_checker.repro_on_fixed_kernel(syz_commit, case["commit"], config, c_repro, i386, commit, crashes_path=crashes_path, limitedMutation=limitedMutation)
+    return res
   
   def save_case(self, hash_val, exitcode, case, limitedMutation, impact_without_mutating, title=None, secondary_fuzzing=False):
-      return self.__save_case(hash_val=hash_val, exitcode=exitcode, case=case, limitedMutation=limitedMutation, impact_without_mutating=impact_without_mutating, title=title, secondary_fuzzing=secondary_fuzzing)
+    return self.__save_case(hash_val=hash_val, exitcode=exitcode, case=case, limitedMutation=limitedMutation, impact_without_mutating=impact_without_mutating, title=title, secondary_fuzzing=secondary_fuzzing)
 
   def __check_confirmed(self, hash_val):
-      return False
+    return False
   
   def __run_linux_clone_script(self):
-    chmodX("syzscope/scripts/linux-clone.sh")
-    index = str(self.index)
-    self.logger.info("run: scripts/linux-clone.sh {} {}".format(self.index, self.linux_folder, index))
-    call(["syzscope/scripts/linux-clone.sh", self.linux_folder, index])
+    chmodX("scripts/linux-clone.sh")
+    self.logger.info("run: scripts/linux-clone.sh {} {}".format(self.linux_addr, self.kernel_path))
+    call(["scripts/linux-clone.sh", self.linux_addr, self.kernel_path])
 
   def __run_delopy_script(self, hash_val, case):
+    ipdb.set_trace()
     commit = case["commit"]
     syzkaller = case["syzkaller"]
     config = case["config"]
@@ -507,6 +479,20 @@ class Deployer(Workers):
     chmodX(target)
     index = str(self.index)
     self.logger.info("run: scripts/deploy.sh")
+    # print([target, 
+    #            self.linux_folder, 
+    #            hash_val, 
+    #            commit, 
+    #            syzkaller, 
+    #            config, 
+    #            testcase, 
+    #            index, 
+    #            self.catalog, 
+    #            image, 
+    #            self.arch, 
+    #            self.compiler, 
+    #            str(self.max_compiling_kernel)
+    #           ])
     p = Popen([target, 
                self.linux_folder, 
                hash_val, 

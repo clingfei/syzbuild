@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-#
 # Usage ./deplay-bc.sh linux_clone_path index case_path commit config
 
 set -ex

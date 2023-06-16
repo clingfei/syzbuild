@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-#
 # Usage ./upload-exp.sh case_path syz_repro_url ssh_port image_path syz_commit type c_repro i386
 # EXITCODE: 2: syz-execprog supports -enable. 3: syz-execprog do not supports -enable.
 

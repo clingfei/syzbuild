@@ -32,3 +32,4 @@ docs/_build/
 work/
 __pycache__/
 tools/
+log

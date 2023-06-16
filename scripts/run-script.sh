@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-#
 # Usage ./run-script.sh command ssh_port image_path case_path
 
 echo "running run-script.sh"

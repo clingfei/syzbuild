@@ -1,6 +1,4 @@
 #!/bin/bash
-# Usage ./deploy.sh linux_clone_path case_hash linux_commit syzkaller_commit linux_config testcase index catalog image arch gcc_version kasan_patch max_compiling_kernel
-
 set -ex
 
 echo "running deploy.sh"
@@ -104,20 +102,19 @@ ARCH=${10}
 COMPILER_VERSION=${11}
 MAX_COMPILING_KERNEL=${12}
 PROJECT_PATH="$(pwd)"
-PKG_NAME="syzscope"
 CASE_PATH=$PROJECT_PATH/work/$CATALOG/$HASH
-PATCHES_PATH=$PROJECT_PATH/$PKG_NAME/patches
+PATCHES_PATH=$PROJECT_PATH/patches
 echo "Compiler: "$COMPILER_VERSION | grep gcc && \
 COMPILER=$PROJECT_PATH/tools/$COMPILER_VERSION/bin/gcc || COMPILER=$PROJECT_PATH/tools/$COMPILER_VERSION/bin/clang
 N_CORES=$((`nproc` / $MAX_COMPILING_KERNEL))
 
-if [ ! -d "tools/$1-$INDEX" ]; then
+if [ ! -d "$1" ]; then
   echo "No linux repositories detected"
   exit 1
 fi
 
 # Check if linux is cloned by git
-cd tools/$1-$INDEX
+cd $1
 if [ ! -d ".git" ]; then
   echo "This linux repo is not clone by git."
   exit 1
@@ -192,14 +189,15 @@ cd ..
 
 #Building kernel
 echo "[+] Building kernel"
-OLD_INDEX=`ls -l linux | cut -d'-' -f 3`
-if [ "$OLD_INDEX" != "$INDEX" ]; then
-  rm -rf "./linux" || echo "No linux repo"
-  ln -s $PROJECT_PATH/tools/$1-$INDEX ./linux
-  if [ -f "$CASE_PATH/.stamp/BUILD_KERNEL" ]; then
-      rm $CASE_PATH/.stamp/BUILD_KERNEL
-  fi
-fi
+# OLD_INDEX=`ls -l linux | cut -d'-' -f 3`
+# if [ "$OLD_INDEX" != "$INDEX" ]; then
+#   rm -rf "./linux" || echo "No linux repo"
+#   ln -s $PROJECT_PATH/tools/$1-$INDEX ./linux
+#   if [ -f "$CASE_PATH/.stamp/BUILD_KERNEL" ]; then
+#       rm $CASE_PATH/.stamp/BUILD_KERNEL
+#   fi
+# fi
+
 if [ ! -f "$CASE_PATH/.stamp/BUILD_KERNEL" ]; then
   cd linux
   if [ -f "THIS_KERNEL_IS_BEING_USED" ]; then

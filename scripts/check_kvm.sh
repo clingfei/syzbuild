@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-
 set -e
 
 function add_user_to_kvm_group() {

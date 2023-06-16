@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-#
 # Usage ./init-replay.sh SUBFOLER HASH
 
 set -e

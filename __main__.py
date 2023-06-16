@@ -20,11 +20,11 @@ def args_parse():
                       help='Install required packages and compile essential tools')
   parser.add_argument('--debug', action='store_true',
                         help='Enable debug mode')
+  parser.add_argument('--force', action='store_true',
+                        help='Force to run all cases even it has finished\n')
 
   args = parser.parse_args()
   return args
-
-
 
 def check_kvm():
   proj_path = os.path.join(os.getcwd())
@@ -56,26 +56,7 @@ def deploy_one_case(index, args, hash_val):
   case = crawler.cases[hash_val]
   dp = Deployer(index=index, 
                 debug=args.debug, 
-                force=args.force, 
-                port=int(args.ssh), 
-                replay=args.replay,
-                linux_index=int(args.linux), 
-                time=int(args.timeout_kernel_fuzzing), 
-                kernel_fuzzing=args.kernel_fuzzing, 
-                reproduce= args.reproduce, 
-                alert=args.alert,
-                static_analysis=args.static_analysis,
-                symbolic_execution=args.symbolic_execution,
-                gdb_port=int(args.gdb),
-                qemu_monitor_port=int(args.qemu_monitor), 
-                max_compiling_kernel=int(args.max_compiling_kernel_concurrently),
-                timeout_dynamic_validation=args.timeout_dynamic_validation,
-                timeout_static_analysis=args.timeout_static_analysis,
-                timeout_symbolic_execution=args.timeout_symbolic_execution,
-                parallel_max=int(args.parallel_max),
-                guided=args.guided, 
-                be_bully=args.be_bully, 
-                se_poc=args.SE_PoC)
+               )
   dp.deploy(hash_val, case)
   del dp
 
@@ -184,33 +165,35 @@ if __name__ == '__main__':
   ignore = []
   build_work_dir()
 
+  print(args.debug)
   crawler = Crawler(debug=args.debug)
   if args.url != None:
     # https://syzkaller.appspot.com/bug?id=1bef50bdd9622a1969608d1090b2b4a588d0c6ac 
-    if args.url.__contains__("?extid="):
-      idx = args.url.index("?extid=")+len("?extid=")
+    if args.url.__contains__("bug?id="):
+      idx = args.url.index("bug?id=")+len("bug?id=")
       hash = args.url[idx:]
       crawler.run_one_case(hash,0)
     # https://syzkaller.appspot.com/bug?extid=dcc068159182a4c31ca3
-    elif args.url.__contains__("bug?id="):
-      idx = args.url.index("bug?id=")+len("bug?id=")
+    elif args.url.__contains__("?extid="):
+      idx = args.url.index("?extid=")+len("?extid=")
       hash = args.url[idx:]
       crawler.run_one_case(hash,1)
     else:
       print("url format not support")
       exit(-1)
 
-  # parallel_count = 0
-  # lock = threading.Lock()
-  # g_cases = manager.Queue()
-  # for key in crawler.cases:
-  #   g_cases.put(key)
-  # l = list(crawler.cases.keys())
-  # total = len(l)
-  # rest = manager.Value('i', total)
-  # ipdb.set_trace()
+  parallel_count = 0
+  manager = multiprocessing.Manager()
+  lock = threading.Lock()
+  g_cases = manager.Queue()
+  for key in crawler.cases:
+    g_cases.put(key)
+  l = list(crawler.cases.keys())
+  total = len(l)
+  rest = manager.Value('i', total)
+
 
   # for i in range(0,min(parallel_max,total)):
   #   x = threading.Thread(target=prepare_cases, args=(i, args,), name="lord-{}".format(i))
   #   x.start()
-  # prepare_case(0, args)
+  prepare_case(0, args)

@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-#
 # Usage ./run-vm.sh image_path linux_path ssh_port
 
 set -ex

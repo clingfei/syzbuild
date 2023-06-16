@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-#
 # Usage ./deploy_linux fixed linux_path patch_path [linux_commit, config_url, mode]
 
 set -ex

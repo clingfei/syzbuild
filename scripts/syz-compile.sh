@@ -1,6 +1,4 @@
 #!/bin/bash
-# Xiaochen Zou 2020, University of California-Riverside
-#
 # Usage ./syz-compile.sh syzpath arch
 
 if [ $# -ne 2 ]; then
