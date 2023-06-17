@@ -174,7 +174,6 @@ if __name__ == '__main__':
   build_work_dir()
 
   # print(args.debug)
-  import ipdb; ipdb.set_trace()
   crawler = Crawler(debug=args.debug)
   if args.url != None:
     # https://syzkaller.appspot.com/bug?id=1bef50bdd9622a1969608d1090b2b4a588d0c6ac 
