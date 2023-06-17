@@ -61,7 +61,7 @@ def deploy_one_case(args, hash_val):
   index = 0
   dp = Deployer(index=index,
                 debug=args.debug, 
-                max=int(args.max_compiling_kernel_concurrently)
+                max=int(args.max)
                )
   dp.deploy(hash_val, case)
   del dp
