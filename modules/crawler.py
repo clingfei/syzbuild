@@ -1,9 +1,7 @@
 import requests
 import logging
-import os
+import os,sys
 import re
-import ipdb
-
 from modules.utilities import request_get, extract_vul_obj_offset_and_size, regx_get
 from bs4 import BeautifulSoup
 from bs4 import element
@@ -27,27 +25,20 @@ class Crawler:
     self.cases = {}
     self.patches = {}
     self.logger = None
-    self.logger2file = None
     self.init_logger(debug)
-    # print(debug)
 
   def init_logger(self, debug):
-    handler = logging.FileHandler("{}/info".format(os.getcwd()))
+    handler = logging.StreamHandler(sys.stderr)
     format =  logging.Formatter('%(asctime)s %(levelname)s %(message)s')
     handler.setFormatter(format)
     self.logger = logging.getLogger(__name__)
-    self.logger2file = logging.getLogger("log2file")
     if debug:
       self.logger.setLevel(logging.DEBUG)
       self.logger.propagate = True
-      self.logger2file.setLevel(logging.DEBUG)
-      self.logger2file.propagate = True
     else:
       self.logger.setLevel(logging.INFO)
       self.logger.propagate = False
-      self.logger2file.setLevel(logging.INFO)
-      self.logger2file.propagate = False
-    self.logger2file.addHandler(handler)
+    self.logger.addHandler(handler)
 
   def run_one_case(self, hash, flag):
     self.logger.info("retreive one case: %s",hash)
@@ -93,7 +84,8 @@ class Crawler:
   def retreive_case(self, url, hash):
     self.cases[hash] = {}
     detail = self.request_detail(url)
-    print(detail)
+    self.logger.info("get table")
+    self.logger.debug(detail)
     # TODO: 不需要这样数量的限定，但是也要找到一个方法来限制一下
     # if len(detail) < num_of_elements:
     #   self.logger.error("Failed to get detail of a case {}".format(url))
@@ -120,7 +112,6 @@ class Crawler:
     tables = self.__get_table(url)
     if tables == []:
       print("error occur in request_detail: {}".format(hash))
-      self.logger2file.info("[Failed] {} error occur in request_detail".format(url))
       return []
     count = 0
     for table in tables:
@@ -185,10 +176,9 @@ class Crawler:
             except:
               self.logger.info("Failed to retrieve case {}{}{}".format(syzbot_host_url, syzbot_bug_base_url, hash))
               continue
-            self.logger.info("get table ")
             return [kernel, commit, syzkaller, config, syz_repro, log, c_repro, time_str, manager_str, report, offset, size]
         break
-    self.logger2file.info("[Failed] {} fail to find a proper crash".format(url))
+    self.logger.info("[Failed] {} fail to find a proper crash".format(url))
     return []
 
   def __get_table(self, url):

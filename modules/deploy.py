@@ -124,10 +124,9 @@ class Deployer():
     elif utilities.regx_match(r'amd64', case["manager"]):
       self.arch = "amd64"
     else:
-      print("arch must be i386/amd64")
+      # TODO: 有些确实是其他架构的需要区别出来，一般人眼先看看
+      # print("arch must be i386/amd64")
       self.arch = "amd64"
-      # TODO: 有些确实是其他架构的需要区别出来，不过一般人眼先看看
-      # exit(-1)
 
     self.logger.info(hash_val)
 
@@ -150,7 +149,7 @@ class Deployer():
     # TODO: 这里直接clone新的linux，不做复用
     self.linux_folder = self.kernel_path
     if os.path.exists(self.linux_folder):
-      print("linux cloned folder existed!\n") 
+      self.logger.info("linux cloned folder existed!\n") 
     else:
       self.__run_linux_clone_script()
 
@@ -554,7 +553,6 @@ class Deployer():
     target = os.path.join(self.package_path, "scripts/deploy.sh")
     chmodX(target)
     self.logger.info("run: scripts/deploy.sh")
-    import ipdb; ipdb.set_trace()
     p = Popen([target, 
                self.linux_folder, 
                hash_val, 

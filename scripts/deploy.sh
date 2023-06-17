@@ -59,13 +59,14 @@ function set_git_config() {
 function build_golang() {
   echo "setup golang environment"
   rm goroot || echo "clean goroot"
-  wget https://dl.google.com/go/go1.14.2.linux-amd64.tar.gz
-  tar -xf go1.14.2.linux-amd64.tar.gz
+  wget https://go.dev/dl/go1.20.5.linux-amd64.tar.gz
+  tar -xf go1.20.5.linux-amd64.tar.gz
+  rm -rf goroot
   mv go goroot
   if [ ! -d "gopath" ]; then
     mkdir gopath
   fi
-  rm go1.14.2.linux-amd64.tar.gz
+  rm go1.20.5.linux-amd64.tar.gz
 }
 
 function back_to_newest_version() {
@@ -127,12 +128,13 @@ fi
 cd ..
 
 # Check for golang environment
-# export GOPATH=$CASE_PATH/gopath
-# export GOROOT=$PROJECT_PATH/tools/goroot
+echo "[+] Downloading golang"
+build_golang
+export GOPATH=$CASE_PATH/gopath
+export GOROOT=$CASE_PATH/goroot
 export LLVM_BIN=$PROJECT_PATH/tools/llvm/build/bin
 export PATH=$GOROOT/bin:$LLVM_BIN:$PATH
-echo "[+] Downloading golang"
-go version || build_golang
+# go version || build_golang
 
 cd $CASE_PATH || exit 1
 if [ ! -d ".stamp" ]; then
@@ -152,27 +154,26 @@ echo "[+] Building syzkaller"
 # touch $CASE_PATH/.stamp/BUILD_SYZKALLER
 if [ ! -f "$CASE_PATH/.stamp/BUILD_SYZKALLER" ]; then
   if [ -d "$GOPATH/src/github.com/google/syzkaller" ]; then
-    # rm -rf $GOPATH/src/github.com/google/syzkaller
-    echo "syzkaller folder exist"
-  else
-    mkdir -p $GOPATH/src/github.com/google/ || echo "Dir exists"
-    cd $GOPATH/src/github.com/google/
-    echo $PROJECT_PATH
-    cp -r $PROJECT_PATH/tools/gopath/src/github.com/google/syzkaller ./
+    rm -rf $GOPATH/src/github.com/google/syzkaller
   fi
+  mkdir -p $GOPATH/src/github.com/google/ || echo "Dir exists"
+  cd $GOPATH/src/github.com/google/
+  echo $PROJECT_PATH
+  cp -r $PROJECT_PATH/tools/gopath/src/github.com/google/syzkaller ./
   # go get -u -d github.com/google/syzkaller/prog
   cd $GOPATH/src/github.com/google/syzkaller || exit 1
   # git stash --all || set_git_config
   # if [ ! -d "/bin" ]; then
   git checkout $SYZKALLER
-    # make clean
-    # git checkout -
-    # retrieve_proper_patch
-    # cp $PATCHES_PATH/syzkaller-9b1f3e6.patch ./syzkaller.patch
-    # patch -p1 -i syzkaller.patch
-    # rm -r executor
-    # cp -r $PROJECT_PATH/tools/syzkaller/executor ./executor
-  make -j$N_CORES TARGETARCH=$ARCH TARGETVMARCH=amd64
+  # make clean
+  # git checkout -
+  # retrieve_proper_patch
+  # cp $PATCHES_PATH/syzkaller-9b1f3e6.patch ./syzkaller.patch
+  # patch -p1 -i syzkaller.patch
+  # rm -r executor
+  # cp -r $PROJECT_PATH/tools/syzkaller/executor ./executor
+  pwd
+  make -k -j$N_CORES TARGETARCH=$ARCH TARGETVMARCH=amd64
   if [ ! -d "workdir" ]; then
     mkdir workdir
   fi

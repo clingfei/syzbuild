@@ -2,6 +2,7 @@ import argparse, os, stat, sys
 from queue import Empty
 import json
 import multiprocessing, threading
+import logging
 import gc
 import ipdb
 
@@ -147,6 +148,7 @@ def build_work_dir():
   os.makedirs(comp, exist_ok=True)
 
 if __name__ == '__main__':
+  # logging.getLogger().setLevel(logging.INFO)
   args = args_parse()
 
   if install_requirments() != 0:
@@ -172,6 +174,7 @@ if __name__ == '__main__':
   build_work_dir()
 
   # print(args.debug)
+  import ipdb; ipdb.set_trace()
   crawler = Crawler(debug=args.debug)
   if args.url != None:
     # https://syzkaller.appspot.com/bug?id=1bef50bdd9622a1969608d1090b2b4a588d0c6ac 
