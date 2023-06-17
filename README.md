@@ -12,18 +12,19 @@
 使用方法：
 
 ```sh
-python3 __main__.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd
+python3 main.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd
 ```
+成功将会在`work/completed/hash/dump`下生成所有上述所需
 
-参数介绍
 
 ```sh
-必须用-u指定爬取的url
+-u 指定爬取的url
 --debug 打印log
 --force 无论如何删除原始环境重新构建
+--max 使用最多多少个核心编译内核和syzkaller
 ```
 
 目前一堆垃圾bug，谨慎使用，不断迭代ing
 
 ## acknowledgment
-基于[syzscope](https://github.com/plummm/SyzScope)改进
+基于[syzscope](https://github.com/plummm/SyzScope)

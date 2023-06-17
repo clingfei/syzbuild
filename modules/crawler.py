@@ -29,7 +29,7 @@ class Crawler:
     self.logger = None
     self.logger2file = None
     self.init_logger(debug)
-    print(debug)
+    # print(debug)
 
   def init_logger(self, debug):
     handler = logging.FileHandler("{}/info".format(os.getcwd()))
@@ -94,10 +94,11 @@ class Crawler:
     self.cases[hash] = {}
     detail = self.request_detail(url)
     print(detail)
-    if len(detail) < num_of_elements:
-      self.logger.error("Failed to get detail of a case {}".format(url))
-      self.cases.pop(hash)
-      return -1
+    # TODO: 不需要这样数量的限定，但是也要找到一个方法来限制一下
+    # if len(detail) < num_of_elements:
+    #   self.logger.error("Failed to get detail of a case {}".format(url))
+    #   self.cases.pop(hash)
+    #   return -1
     self.cases[hash]["kernel"] = detail[0]
     self.cases[hash]["commit"] = detail[1]
     self.cases[hash]["syzkaller"] = detail[2]
@@ -133,7 +134,11 @@ class Crawler:
               self.logger.debug("Find kernel: '{}'".format(kernel.text))
               pass
             else:
-              continue
+              self.logger.debug("Find kernel: '{}'".format(kernel.text))
+              # TODO: 基本只要不是linux-next 就可以成功
+              # linux-next 的commit 不能够顺利切换
+              # continue
+              pass
             count += 1
             if count < index:
               continue

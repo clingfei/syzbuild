@@ -33,3 +33,4 @@ work/
 __pycache__/
 tools/
 log
+info

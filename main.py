@@ -22,6 +22,9 @@ def args_parse():
                         help='Enable debug mode')
   parser.add_argument('--force', action='store_true',
                         help='Force to run all cases even it has finished\n')
+  parser.add_argument('-M', '--max', nargs='?',
+                        default='-1',
+                        help='maximum of kernel that compiling at the same time. Default is unlimited.')
 
   args = parser.parse_args()
   return args
@@ -52,10 +55,13 @@ def read_cases_from_cache():
       f.close()
   return cases
 
-def deploy_one_case(index, args, hash_val):
+def deploy_one_case(args, hash_val):
   case = crawler.cases[hash_val]
-  dp = Deployer(index=index, 
+  # TODO: 这里默认的配置是第0个
+  index = 0
+  dp = Deployer(index=index,
                 debug=args.debug, 
+                max=int(args.max_compiling_kernel_concurrently)
                )
   dp.deploy(hash_val, case)
   del dp
@@ -77,14 +83,14 @@ def prepare_cases(index, args):
       x.start()
       x.join()
       gc.collect()
-      remove_using_flag(index)
+      # remove_using_flag(index)
     except Empty:
       lock.release()
       break
   print("Thread {} exit->".format(index))
 
 # only one
-def prepare_case(index, args):
+def prepare_case(args):
   while(1):
     lock.acquire(blocking=True)
     try:
@@ -93,12 +99,12 @@ def prepare_case(index, args):
         rest.value -= 1
         lock.release()
         continue
-      print("Thread {}: run case {} [{}/{}] left".format(index, hash_val, rest.value-1, total))
+      print("run case {} [{}/{}] left".format(hash_val, rest.value-1, total))
       rest.value -= 1
       lock.release()
-      deploy_one_case(index, args, hash_val,)
+      deploy_one_case(args, hash_val)
       gc.collect()
-      remove_using_flag(index)
+      # remove_using_flag()
     except Empty:
       lock.release()
       break
@@ -114,11 +120,11 @@ def get_hash(path):
   for each in ret:
     print(each)
 
-def remove_using_flag(index):
-  project_path = os.getcwd()
-  flag_path = "{}/tools/linux-{}/THIS_KERNEL_IS_BEING_USED".format(project_path,index)
-  if os.path.isfile(flag_path):
-    os.remove(flag_path)
+# def remove_using_flag(index):
+#   project_path = os.getcwd()
+#   flag_path = "{}/tools/linux-{}/THIS_KERNEL_IS_BEING_USED".format(project_path,index)
+#   if os.path.isfile(flag_path):
+#     os.remove(flag_path)
 
 def install_requirments():
   proj_path = os.path.join(os.getcwd())
@@ -165,7 +171,7 @@ if __name__ == '__main__':
   ignore = []
   build_work_dir()
 
-  print(args.debug)
+  # print(args.debug)
   crawler = Crawler(debug=args.debug)
   if args.url != None:
     # https://syzkaller.appspot.com/bug?id=1bef50bdd9622a1969608d1090b2b4a588d0c6ac 
@@ -196,4 +202,4 @@ if __name__ == '__main__':
   # for i in range(0,min(parallel_max,total)):
   #   x = threading.Thread(target=prepare_cases, args=(i, args,), name="lord-{}".format(i))
   #   x.start()
-  prepare_case(0, args)
+  prepare_case(args)

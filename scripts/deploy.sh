@@ -85,8 +85,8 @@ function retrieve_proper_patch() {
   git rev-list 9b1f3e6 | grep $(git rev-parse HEAD) || cp $PATCHES_PATH/syzkaller-9b1f3e6.patch ./syzkaller.patch
 }
 
-if [ $# -ne 12 ]; then
-  echo "Usage ./deploy.sh linux_clone_path case_hash linux_commit syzkaller_commit linux_config testcase index catalog image arch gcc_version max_compiling_kernel"
+if [ $# -ne 10 ]; then
+  echo "Usage ./deploy.sh linux_clone_path case_hash linux_commit syzkaller_commit linux_config catalog image arch gcc_version max_compiling_kernel"
   exit 1
 fi
 
@@ -94,19 +94,23 @@ HASH=$2
 COMMIT=$3
 SYZKALLER=$4
 CONFIG=$5
-TESTCASE=$6
-INDEX=$7
-CATALOG=$8
-IMAGE=$9
-ARCH=${10}
-COMPILER_VERSION=${11}
-MAX_COMPILING_KERNEL=${12}
+CATALOG=$6
+IMAGE=$7
+ARCH=${8}
+COMPILER_VERSION=${9}
+MAX_COMPILING_KERNEL=${10}
 PROJECT_PATH="$(pwd)"
 CASE_PATH=$PROJECT_PATH/work/$CATALOG/$HASH
 PATCHES_PATH=$PROJECT_PATH/patches
 echo "Compiler: "$COMPILER_VERSION | grep gcc && \
 COMPILER=$PROJECT_PATH/tools/$COMPILER_VERSION/bin/gcc || COMPILER=$PROJECT_PATH/tools/$COMPILER_VERSION/bin/clang
-N_CORES=$((`nproc` / $MAX_COMPILING_KERNEL))
+if [ $MAX_COMPILING_KERNEL -eq -1 ]; 
+then
+  N_CORES=`nproc`
+else
+  N_CORES=$MAX_COMPILING_KERNEL
+fi
+
 
 if [ ! -d "$1" ]; then
   echo "No linux repositories detected"
@@ -168,7 +172,7 @@ if [ ! -f "$CASE_PATH/.stamp/BUILD_SYZKALLER" ]; then
   if [ ! -d "workdir" ]; then
     mkdir workdir
   fi
-  curl $TESTCASE > $GOPATH/src/github.com/google/syzkaller/workdir/testcase-$HASH
+  # curl $TESTCASE > $GOPATH/src/github.com/google/syzkaller/workdir/testcase-$HASH
   touch $CASE_PATH/.stamp/BUILD_SYZKALLER
 fi
 
@@ -189,17 +193,14 @@ cd ..
 
 #Building kernel
 echo "[+] Building kernel"
-# OLD_INDEX=`ls -l linux | cut -d'-' -f 3`
-# if [ "$OLD_INDEX" != "$INDEX" ]; then
-#   rm -rf "./linux" || echo "No linux repo"
-#   ln -s $PROJECT_PATH/tools/$1-$INDEX ./linux
-#   if [ -f "$CASE_PATH/.stamp/BUILD_KERNEL" ]; then
-#       rm $CASE_PATH/.stamp/BUILD_KERNEL
-#   fi
-# fi
-
 if [ ! -f "$CASE_PATH/.stamp/BUILD_KERNEL" ]; then
   cd linux
+  if [ -e "vmlinux" ]; then
+    echo "kernel build done"
+    echo "rebuild please make clean"
+    exit 3
+  fi
+
   if [ -f "THIS_KERNEL_IS_BEING_USED" ]; then
     echo "This kernel is using by other thread"
     exit 1

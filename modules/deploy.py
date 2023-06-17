@@ -15,6 +15,10 @@ from dateutil import parser as time_parser
 
 import ipdb
 
+stamp_build_syzkaller = "BUILD_SYZKALLER"
+stamp_build_kernel = "BUILD_KERNEL"
+stamp_reproduce_ori_poc = "REPRO_ORI_POC"
+
 syz_config_template="""
 {{ 
   "target": "linux/amd64/{8}",
@@ -42,25 +46,38 @@ syz_config_template="""
 }}"""
 
 class Deployer():
-  def __init__(self, index=0, debug=False, force=False):
-    self.index= index
+  def __init__(self, index=0, debug=False, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700): 
+    """
+    index: table中的第几个,默认是第0个,因为其他的还没有实现
+    debug: 是否开启log
+    force: 是否重新clone/build
+    max: 编译时候使用的核心最多
+    """
+    self.index = index
     self.debug = debug
     self.force= force
     self.image_switching_date = datetime.datetime(2020, 3, 15)
     self.catalog = 'incomplete'
     self.linux_addr = ""
-    # TODO: 这里默认用8个核心去编译内核
-    self.max_compiling_kernel = 8
+
+    # TODO: 这里默认用nproc个核心去编译内核
+    # self.max = max
+    # if self.max <8 :
+    #   self.max = 8
+    self.max = -1
+    
+    # 这里默认dump是True，就是要把相关环境文件统一保存在dump文件夹下面 
+    self.dump = True
 
   def init_logger(self, debug, hash_val=None):
-    self.logger = logging.getLogger(__name__+str(self.index))
+    self.logger = logging.getLogger(__name__)
     for each in self.logger.handlers:
       self.logger.removeHandler(each)
     handler = logging.StreamHandler(sys.stdout)
     if hash_val != None:
-      format = logging.Formatter('%(asctime)s Thread {}: {} %(message)s'.format(self.index, hash_val))
+      format = logging.Formatter('%(asctime)s Thread 0: {} %(message)s'.format(hash_val))
     else:
-      format = logging.Formatter('%(asctime)s Thread {}: %(message)s'.format(self.index))
+      format = logging.Formatter('%(asctime)s Thread 0: %(message)s')
     handler.setFormatter(format)
     self.logger.addHandler(handler)
     if debug:
@@ -74,11 +91,33 @@ class Deployer():
     self.hash_val = hash_val
     self.init_logger(self.debug, self.hash_val[:7])
 
+  def __check_stamp(self, name, hash_val, folder):
+    stamp_path1 = "{}/work/{}/{}/.stamp/{}".format(self.project_path, folder, hash_val, name)
+    return os.path.isfile(stamp_path1)
+
+  def reproduced_ori_poc(self, hash_val, folder):
+    return self.__check_stamp(stamp_reproduce_ori_poc, hash_val[:7], folder)
+
+  # def init_crash_checker(self, port):
+  #   self.crash_checker = CrashChecker(
+  #       self.project_path,
+  #       self.current_case_path,
+  #       port,
+  #       self.logger,
+  #       self.debug,
+  #       self.index,
+  #       self.max_qemu_for_one_case,
+  #       store_read=self.store_read,
+  #       compiler=self.compiler,
+  #       max_compiling_kernel=self.max_compiling_kernel)
+
   def deploy(self, hash_val, case):
     self.setup_hash(hash_val)
     self.project_path = os.getcwd()
     self.package_path = os.path.join(self.project_path)
     self.current_case_path = "{}/work/{}/{}".format(self.project_path, self.catalog, hash_val[:7])
+    if self.dump:
+      self.dump_path=self.current_case_path+"/dump"
     self.image_path = "{}/img".format(self.current_case_path)
     self.syzkaller_path = "{}/gopath/src/github.com/google/syzkaller".format(self.current_case_path)
     self.kernel_path = "{}/linux".format(self.current_case_path)
@@ -95,7 +134,7 @@ class Deployer():
     self.logger.info(hash_val)
 
     self.compiler = utilities.set_compiler_version(time_parser.parse(case["time"]), case["config"])
-    impact_without_mutating = False
+    # impact_without_mutating = False
     succeed = self.__create_dir_for_case()
     if self.force:
       self.cleanup_built_kernel(hash_val)
@@ -103,13 +142,11 @@ class Deployer():
     self.case_logger = self.__init_case_logger("{}-log".format(hash_val))
     self.case_info_logger = self.__init_case_logger("{}-info".format(hash_val))
 
-    # url = syzbot_host_url + syzbot_bug_base_url + hash_val
-    # self.case_info_logger.info(url)
-    # self.case_info_logger.info("pid: {}".format(os.getpid()))
-
     i386 = None
     if utilities.regx_match(r'386', case["manager"]):
       i386 = True
+    
+    # self.init_crash_checker(self.ssh_port)
     
     self.linux_addr = case['kernel']
     # TODO: 这里直接clone新的linux，不做复用
@@ -117,7 +154,7 @@ class Deployer():
     if os.path.exists(self.linux_folder):
       print("linux cloned folder existed!\n") 
     else:
-      self.clone_linux()
+      self.__run_linux_clone_script()
 
     r = self.__run_delopy_script(hash_val[:7], case)
     if r != 0:
@@ -125,40 +162,68 @@ class Deployer():
       self.__save_error(hash_val)
       return
 
-    req = requests.request(method='GET', url=case["syz_repro"])
-    is_error = 0
-    self.__write_config(req.content.decode("utf-8"), hash_val[:7])
-    if self.kernel_fuzzing:
-      title = None
-      if not self.reproduced_ori_poc(hash_val, 'incomplete'):
-        impact_without_mutating, title = self.do_reproducing_ori_poc(case, hash_val, i386)
-      if not self.finished_fuzzing(hash_val, 'incomplete'):
-        limitedMutation = True
-        if 'patch' in case:
-          limitedMutation = False
-        exitcode = self.run_syzkaller(hash_val, limitedMutation)
-        #self.remove_gopath(os.path.join(self.current_case_path, "poc"))
-        is_error = self.save_case(hash_val, exitcode, case, limitedMutation, impact_without_mutating, title=title)
-      else:
-        self.logger.info("{} has finished fuzzing".format(hash_val[:7]))
-    elif self.reproduce_ori_bug:
-      if not self.reproduced_ori_poc(hash_val, 'incomplete'):
-        impact_without_mutating, title = self.do_reproducing_ori_poc(case, hash_val, i386)
-        #self.remove_gopath(os.path.join(self.current_case_path, "poc"))
-        is_error = self.save_case(hash_val, 0, case, False, impact_without_mutating, title=title)
+    # TODO: CrashChecker和Kernel Fuzzing部分暂时不启用
+    # self.__write_config(req.content.decode("utf-8"), hash_val[:7])
+    # if self.kernel_fuzzing:
+    #   title = None
+    #   if not self.reproduced_ori_poc(hash_val, 'incomplete'):
+    #     impact_without_mutating, title = self.do_reproducing_ori_poc(case, hash_val, i386)
+    #   if not self.finished_fuzzing(hash_val, 'incomplete'):
+    #     limitedMutation = True
+    #     if 'patch' in case:
+    #       limitedMutation = False
+    #     exitcode = self.run_syzkaller(hash_val, limitedMutation)
+    #     #self.remove_gopath(os.path.join(self.current_case_path, "poc"))
+    #     is_error = self.save_case(hash_val, exitcode, case, limitedMutation, impact_without_mutating, title=title)
+    #   else:
+    #     self.logger.info("{} has finished fuzzing".format(hash_val[:7]))
+    # elif self.reproduce_ori_bug:
+    #   if not self.reproduced_ori_poc(hash_val, 'incomplete'):
+    #     impact_without_mutating, title = self.do_reproducing_ori_poc(case, hash_val, i386)
+    #     #self.remove_gopath(os.path.join(self.current_case_path, "poc"))
+    #     is_error = self.save_case(hash_val, 0, case, False, impact_without_mutating, title=title)
+    if self.dump:
+      execprog_path = self.syzkaller_path+"/bin/linux_amd64/syz-execprog"
+      executor_path = self.syzkaller_path+"/bin/linux_amd64/syz-executor"
+      vmlinux_path = self.kernel_path+"/vmlinux"
+      bzImage_path = self.kernel_path+"/arch/x86/boot/bzImage"
 
-    if succeed:
-      self.__move_to_succeed(0)
-    elif is_error:
-      self.__save_error(hash_val)
-    else:
-      self.__move_to_completed()
+      os.makedirs(self.dump_path, exist_ok=True)
+
+      shutil.copyfile(execprog_path, self.dump_path+"/syz-execprog")
+      shutil.copyfile(executor_path, self.dump_path+"/syz-executor")
+      shutil.copyfile(vmlinux_path, self.dump_path+"/vmlinux")
+      shutil.copyfile(bzImage_path, self.dump_path+"/bzImage")
+
+      if case['syz_repro']:
+        req = requests.request(method='GET', url=case["syz_repro"])
+        with open(self.dump_path+"/"+str(self.index)+".prog", "wb") as f:
+          f.write(req.content)
+      
+      if case['c_repro']:
+        req = requests.request(method='GET', url=case["c_repro"])
+        with open(self.dump_path+"/"+str(self.index)+".c", "wb") as f:
+          f.write(req.content)
+        
+      if case['log']:
+        req = requests.request(method='GET', url=case["log"])
+        with open(self.dump_path+"/log", "wb") as f:
+          f.write(req.content)
+      
+      if case['report']:
+        req = requests.request(method='GET', url=case["report"])
+        with open(self.dump_path+"/report", "wb") as f:
+          f.write(req.content)
+      
+      # succeed = 1
+
+    # if succeed:
+    #   self.__move_to_succeed(0)
+    # elif is_error:
+    #   self.__save_error(hash_val)
+    # else:
+    self.__move_to_completed()
     
-    return self.index
-
-  def clone_linux(self):
-    self.__run_linux_clone_script()
-
   def run_syzkaller(self, hash_val, limitedMutation):
     self.logger.info("run syzkaller".format(self.index))
     syzkaller = os.path.join(self.syzkaller_path, "bin/syz-manager")
@@ -167,39 +232,50 @@ class Deployer():
     # If failed to trigger a write crash, we enable more syscalls to run it again
     for _ in range(0, 3):
       if self.logger.level == logging.DEBUG:
-          p = Popen([syzkaller, "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), "-debug", "-poc"],
+        p = Popen([syzkaller, 
+                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), 
+                   "-debug", 
+                   "-poc"
+                  ],
+              stdout=PIPE,
+              stderr=STDOUT
+              )
+        with p.stdout:
+          self.__log_subprocess_output(p.stdout, logging.INFO)
+        exitcode = p.wait()
+
+        if not limitedMutation:
+          p = Popen([syzkaller, 
+                     "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7]), 
+                     "-debug"
+                    ],
               stdout=PIPE,
               stderr=STDOUT
               )
           with p.stdout:
-              self.__log_subprocess_output(p.stdout, logging.INFO)
-          exitcode = p.wait()
-
-          if not limitedMutation:
-              p = Popen([syzkaller, "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7]), "-debug"],
-                  stdout=PIPE,
-                  stderr=STDOUT
-                  )
-              with p.stdout:
-                  self.__log_subprocess_output(p.stdout, logging.INFO)
-          exitcode = p.wait()
+            self.__log_subprocess_output(p.stdout, logging.INFO)
+        exitcode = p.wait()
       else:
-          p = Popen([syzkaller, "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), "-poc"],
+        p = Popen([syzkaller,
+                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), 
+                   "-poc"
+                  ],
+            stdout = PIPE,
+            stderr = STDOUT
+            )
+        with p.stdout:
+          self.__log_subprocess_output(p.stdout, logging.INFO)
+        exitcode = p.wait()
+
+        if not limitedMutation:
+          p = Popen([syzkaller,
+                     "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7])],
               stdout = PIPE,
               stderr = STDOUT
               )
           with p.stdout:
-              self.__log_subprocess_output(p.stdout, logging.INFO)
-          exitcode = p.wait()
-
-          if not limitedMutation:
-              p = Popen([syzkaller, "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7])],
-                  stdout = PIPE,
-                  stderr = STDOUT
-                  )
-              with p.stdout:
-                  self.__log_subprocess_output(p.stdout, logging.INFO)
-          exitcode = p.wait()
+            self.__log_subprocess_output(p.stdout, logging.INFO)
+        exitcode = p.wait()
       if exitcode != 4:
           break
     self.logger.info("syzkaller is done with exitcode {}".format(exitcode))
@@ -343,6 +419,7 @@ class Deployer():
                   f.close()
                   find_it = True
                   break
+
       if pattern_type == utilities.SYSCALL:
           if utilities.regx_match(r'^syz_', pattern):
               regx_pattern = "^"+pattern
@@ -462,11 +539,12 @@ class Deployer():
     call(["scripts/linux-clone.sh", self.linux_addr, self.kernel_path])
 
   def __run_delopy_script(self, hash_val, case):
-    ipdb.set_trace()
     commit = case["commit"]
     syzkaller = case["syzkaller"]
     config = case["config"]
     testcase = case["syz_repro"]
+    if not testcase:
+      testcase = ""
     time = case["time"]
     self.case_info_logger.info("\ncommit: {}\nsyzkaller: {}\nconfig: {}\ntestcase: {}\ntime: {}\narch: {}".format(commit,syzkaller,config,testcase,time,self.arch))
 
@@ -477,35 +555,18 @@ class Deployer():
       image = "wheezy"
     target = os.path.join(self.package_path, "scripts/deploy.sh")
     chmodX(target)
-    index = str(self.index)
     self.logger.info("run: scripts/deploy.sh")
-    # print([target, 
-    #            self.linux_folder, 
-    #            hash_val, 
-    #            commit, 
-    #            syzkaller, 
-    #            config, 
-    #            testcase, 
-    #            index, 
-    #            self.catalog, 
-    #            image, 
-    #            self.arch, 
-    #            self.compiler, 
-    #            str(self.max_compiling_kernel)
-    #           ])
     p = Popen([target, 
                self.linux_folder, 
                hash_val, 
                commit, 
                syzkaller, 
                config, 
-               testcase, 
-               index, 
                self.catalog, 
                image, 
                self.arch, 
                self.compiler, 
-               str(self.max_compiling_kernel)
+               str(self.max)
               ],
               stdout=PIPE,
               stderr=STDOUT
@@ -530,7 +591,18 @@ class Deployer():
     new_syscalls.extend(dependent_syscalls)
     new_syscalls = utilities.unique(new_syscalls)
     enable_syscalls = "\"" + "\",\n\t\"".join(new_syscalls) + "\""
-    syz_config = syz_config_template.format(self.syzkaller_path, self.kernel_path, self.image_path, enable_syscalls, hash_val, self.ssh_port, self.current_case_path, self.time_limit, self.arch, self.max_qemu_for_one_case, str(self.store_read).lower())
+    syz_config = syz_config_template.format(self.syzkaller_path, 
+                                            self.kernel_path, 
+                                            self.image_path, 
+                                            enable_syscalls, 
+                                            hash_val, 
+                                            self.ssh_port, 
+                                            self.current_case_path, 
+                                            self.time_limit, 
+                                            self.arch, 
+                                            self.max_qemu_for_one_case, 
+                                            str(self.store_read).lower()
+                                            )
     f = open(os.path.join(self.syzkaller_path, "workdir/{}-poc.cfg".format(hash_val)), "w")
     f.writelines(syz_config)
     f.close()
@@ -538,8 +610,8 @@ class Deployer():
     #Add more syscalls
     new_added_syscalls = []
     for i in range(0, min(2,len(syscalls))):
-        if syscalls[len(syscalls)-1-i] not in new_added_syscalls:
-            new_added_syscalls.extend(self.__extract_all_syscalls(syscalls[len(syscalls)-1-i], self.syzkaller_path))
+      if syscalls[len(syscalls)-1-i] not in new_added_syscalls:
+        new_added_syscalls.extend(self.__extract_all_syscalls(syscalls[len(syscalls)-1-i], self.syzkaller_path))
     raw_syscalls = self.__extract_raw_syscall(new_added_syscalls)
     new_syscalls = syscalls.copy()
     new_syscalls.extend(raw_syscalls)
@@ -551,69 +623,69 @@ class Deployer():
     f.close()
 
   def __extract_syscalls(self, testcase):
-      res = []
-      text = testcase.split('\n')
-      for line in text:
-          if len(line)==0 or line[0] == '#':
-              continue
-          m = re.search(r'(\w+(\$\w+)?)\(', line)
-          if m == None or len(m.groups()) == 0:
-              self.logger.info("Failed to extract syscall from {}".format(self.index, line))
-              return res
-          syscall = m.groups()[0]
-          res.append(syscall)
-      return res
+    res = []
+    text = testcase.split('\n')
+    for line in text:
+      if len(line)==0 or line[0] == '#':
+        continue
+      m = re.search(r'(\w+(\$\w+)?)\(', line)
+      if m == None or len(m.groups()) == 0:
+        self.logger.info("Failed to extract syscall from {}".format(self.index, line))
+        return res
+      syscall = m.groups()[0]
+      res.append(syscall)
+    return res
 
   def __extract_dependent_syscalls(self, syscall, syzkaller_path, search_path="sys/linux", extension=".txt"):
-      res = []
-      dir = os.path.join(syzkaller_path, search_path)
-      if not os.path.isdir(dir):
-          self.logger.info("{} do not exist".format(dir))
-          return res
-      for file in os.listdir(dir):
-          if file.endswith(extension):
-              find_it = False
-              f = open(os.path.join(dir, file), "r")
-              text = f.readlines()
-              f.close()
-              line_index = 0
-              for line in text:
-                  if line.find(syscall) != -1:
-                      find_it = True
-                      break
-                  line_index += 1
-
-              if find_it:
-                  upper_bound = 0
-                  lower_bound = 0
-                  for i in range(0, len(text)):
-                      if line_index+i<len(text):
-                          line = text[line_index+i]
-                          if utilities.regx_match(r'^\n', line):
-                              upper_bound = 1
-                          if upper_bound == 0:
-                              m = re.match(r'(\w+(\$\w+)?)\(', line)
-                              if m != None and len(m.groups()) > 0:
-                                  call = m.groups()[0]
-                                  res.append(call)
-                      else:
-                          upper_bound = 1
-
-                      if line_index-i>=0:
-                          line = text[line_index-i]
-                          if utilities.regx_match(r'^\n', line):
-                              lower_bound = 1
-                          if lower_bound == 0:
-                              m = re.match(r'(\w+(\$\w+)?)\(', line)
-                              if m != None and len(m.groups()) > 0:
-                                  call = m.groups()[0]
-                                  res.append(call)
-                      else:
-                          lower_bound = 1
-
-                      if upper_bound and lower_bound:
-                          return res
+    res = []
+    dir = os.path.join(syzkaller_path, search_path)
+    if not os.path.isdir(dir):
+      self.logger.info("{} do not exist".format(dir))
       return res
+    for file in os.listdir(dir):
+      if file.endswith(extension):
+        find_it = False
+        f = open(os.path.join(dir, file), "r")
+        text = f.readlines()
+        f.close()
+        line_index = 0
+        for line in text:
+          if line.find(syscall) != -1:
+            find_it = True
+            break
+          line_index += 1
+
+        if find_it:
+          upper_bound = 0
+          lower_bound = 0
+          for i in range(0, len(text)):
+            if line_index+i<len(text):
+              line = text[line_index+i]
+              if utilities.regx_match(r'^\n', line):
+                upper_bound = 1
+              if upper_bound == 0:
+                m = re.match(r'(\w+(\$\w+)?)\(', line)
+                if m != None and len(m.groups()) > 0:
+                  call = m.groups()[0]
+                  res.append(call)
+            else:
+              upper_bound = 1
+
+            if line_index-i>=0:
+              line = text[line_index-i]
+              if utilities.regx_match(r'^\n', line):
+                lower_bound = 1
+              if lower_bound == 0:
+                m = re.match(r'(\w+(\$\w+)?)\(', line)
+                if m != None and len(m.groups()) > 0:
+                  call = m.groups()[0]
+                  res.append(call)
+            else:
+              lower_bound = 1
+
+            if upper_bound and lower_bound:
+              return res
+    return res
       
   def __extract_all_syscalls(self, last_syscall, syzkaller_path, search_path="sys/linux", extension=".txt"):
       res = []
@@ -622,36 +694,36 @@ class Deployer():
           self.logger.info("{} do not exist".format(dir))
           return res
       for file in os.listdir(dir):
-          if file.endswith(extension):
-              find_it = False
-              f = open(os.path.join(dir, file), "r")
-              text = f.readlines()
-              f.close()
-              for line in text:
-                  if line.find(last_syscall) != -1:
-                      find_it = True
-                      break
+        if file.endswith(extension):
+            find_it = False
+            f = open(os.path.join(dir, file), "r")
+            text = f.readlines()
+            f.close()
+            for line in text:
+                if line.find(last_syscall) != -1:
+                    find_it = True
+                    break
 
-              if find_it:
-                  for line in text:
-                      m = re.match(r'(\w+(\$\w+)?)\(', line)
-                      if m == None or len(m.groups()) == 0:
-                          continue
-                      syscall = m.groups()[0]
-                      res.append(syscall)
-                  break
+            if find_it:
+                for line in text:
+                    m = re.match(r'(\w+(\$\w+)?)\(', line)
+                    if m == None or len(m.groups()) == 0:
+                        continue
+                    syscall = m.groups()[0]
+                    res.append(syscall)
+                break
       return res
   
   def __extract_raw_syscall(self, syscalls):
-      res = []
-      for call in syscalls:
-          m = re.match(r'((\w+)(\$\w+)?)', call)
-          if m == None or len(m.groups()) == 0:
-              continue
-          syscall = m.groups()[1]
-          if syscall not in res:
-              res.append(syscall)
-      return res
+    res = []
+    for call in syscalls:
+      m = re.match(r'((\w+)(\$\w+)?)', call)
+      if m == None or len(m.groups()) == 0:
+        continue
+      syscall = m.groups()[1]
+      if syscall not in res:
+        res.append(syscall)
+    return res
 
   def __save_case(self, hash_val, exitcode, case, limitedMutation, impact_without_mutating, title=None, secondary_fuzzing=False):
       self.__copy_crashes()
@@ -758,69 +830,69 @@ class Deployer():
     self.current_case_path = des
   
   def __move_to_succeed(self, new_impact_type):
-      self.logger.info("Copy to succeed")
-      src = self.current_case_path
-      base = os.path.basename(src)
-      succeed = "{}/work/succeed".format(self.project_path)
-      des = "{}/{}".format(succeed, base)
-      if not os.path.isdir(succeed):
-          os.makedirs(succeed, exist_ok=True)
-      if src == des:
-          return
-      if os.path.isdir(des):
-          try:
-              os.rmdir(des)
-          except:
-              self.logger.info("Fail to delete directory {}".format(des))
-      shutil.move(src, des)
-      self.current_case_path = des
+    self.logger.info("Copy to succeed")
+    src = self.current_case_path
+    base = os.path.basename(src)
+    succeed = "{}/work/succeed".format(self.project_path)
+    des = "{}/{}".format(succeed, base)
+    if not os.path.isdir(succeed):
+      os.makedirs(succeed, exist_ok=True)
+    if src == des:
+      return
+    if os.path.isdir(des):
+      try:
+        os.rmdir(des)
+      except:
+        self.logger.info("Fail to delete directory {}".format(des))
+    shutil.move(src, des)
+    self.current_case_path = des
   
   def __move_to_error(self):
-      self.logger.info("Copy to error")
-      src = self.current_case_path
-      base = os.path.basename(src)
-      error = "{}/work/error".format(self.project_path)
-      des = "{}/{}".format(error, base)
-      if not os.path.isdir(error):
-          os.makedirs(error, exist_ok=True)
-      if src == des:
-          return
-      if os.path.isdir(des):
-          os.rmdir(des)
-      shutil.move(src, des)
-      self.current_case_path = des
+    self.logger.info("Copy to error")
+    src = self.current_case_path
+    base = os.path.basename(src)
+    error = "{}/work/error".format(self.project_path)
+    des = "{}/{}".format(error, base)
+    if not os.path.isdir(error):
+      os.makedirs(error, exist_ok=True)
+    if src == des:
+      return
+    if os.path.isdir(des):
+      os.rmdir(des)
+    shutil.move(src, des)
+    self.current_case_path = des
 
   def __create_dir_for_case(self):
-      res, succeed = self.__copy_from_duplicated_cases()
-      if res:
-          return succeed
-      path = "{}/.stamp".format(self.current_case_path)
-      if not os.path.isdir(path):
-          os.makedirs(path, exist_ok=True)
+    res, succeed = self.__copy_from_duplicated_cases()
+    if res:
       return succeed
+    path = "{}/.stamp".format(self.current_case_path)
+    if not os.path.isdir(path):
+      os.makedirs(path, exist_ok=True)
+    return succeed
 
   def __copy_from_duplicated_cases(self):
-      des = self.current_case_path
-      base = os.path.basename(des)
-      for dirs in ["completed", "incomplete", "error", "succeed"]:
-          src = "{}/work/{}/{}".format(self.project_path, dirs, base)
-          if src == des:
-              continue
-          if os.path.isdir(src):
-              try:
-                  shutil.move(src, des)
-                  self.logger.info("Found duplicated case in {}".format(src))
-                  return True, dirs == "succeed"
-              except:
-                  self.logger.info("Fail to copy the duplicated case from {}".format(src))
-      return False, False
+    des = self.current_case_path
+    base = os.path.basename(des)
+    for dirs in ["completed", "incomplete", "error", "succeed"]:
+      src = "{}/work/{}/{}".format(self.project_path, dirs, base)
+      if src == des:
+        continue
+      if os.path.isdir(src):
+        try:
+          shutil.move(src, des)
+          self.logger.info("Found duplicated case in {}".format(src))
+          return True, dirs == "succeed"
+        except:
+          self.logger.info("Fail to copy the duplicated case from {}".format(src))
+    return False, False
   
   def __get_default_log_format(self):
-      return logging.Formatter('%(asctime)s %(levelname)s [{}] %(message)s'.format(self.index))
+      return logging.Formatter('%(asctime)s %(levelname)s  %(message)s')
 
   def __init_case_logger(self, logger_name):
       handler = logging.FileHandler("{}/log".format(self.current_case_path))
-      format = logging.Formatter('%(asctime)s [{}] %(message)s'.format(self.index))
+      format = logging.Formatter('%(asctime)s %(message)s')
       handler.setFormatter(format)
       logger = logging.getLogger(logger_name)
       logger.setLevel(self.logger.level)
@@ -830,18 +902,6 @@ class Deployer():
           logger.propagate = True
       return logger
   
-  def __init_case_info_logger(self, logger_name):
-      handler = logging.FileHandler("{}/info".format(self.current_case_path))
-      format = self.__get_default_log_format()
-      handler.setFormatter(format)
-      logger = logging.getLogger(logger_name)
-      logger.setLevel(self.logger.level)
-      logger.addHandler(handler)
-      logger.propagate = False
-      if self.debug:
-          logger.propagate = True
-      return logger
-
   def __log_subprocess_output(self, pipe, log_level):
       for line in iter(pipe.readline, b''):
           if log_level == logging.INFO:
@@ -874,7 +934,7 @@ class Deployer():
       return False
   
   def __need_kasan_patch(self, title):
-      return utilities.regx_match(r'slab-out-of-bounds Read', title)
+    return utilities.regx_match(r'slab-out-of-bounds Read', title)
   
   def __distill_testcase(self, text):
       res = ''
