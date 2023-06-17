@@ -57,7 +57,7 @@ def read_cases_from_cache():
 
 def deploy_one_case(args, hash_val):
   case = crawler.cases[hash_val]
-  # TODO: 这里默认的配置是第0个
+  # TODO 这里默认的配置是第0个
   index = 0
   dp = Deployer(index=index,
                 debug=args.debug, 

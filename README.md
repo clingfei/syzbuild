@@ -12,8 +12,9 @@
 使用方法：
 
 ```sh
-python3 main.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd
+proxychains python3 main.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd
 ```
+最好挂上代理，不然clone不下来
 成功将会在`work/completed/hash/dump`下生成所有上述所需
 
 

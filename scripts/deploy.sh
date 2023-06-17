@@ -127,8 +127,8 @@ fi
 cd ..
 
 # Check for golang environment
-export GOPATH=$CASE_PATH/gopath
-export GOROOT=$PROJECT_PATH/tools/goroot
+# export GOPATH=$CASE_PATH/gopath
+# export GOROOT=$PROJECT_PATH/tools/goroot
 export LLVM_BIN=$PROJECT_PATH/tools/llvm/build/bin
 export PATH=$GOROOT/bin:$LLVM_BIN:$PATH
 echo "[+] Downloading golang"
@@ -149,30 +149,33 @@ fi
 
 #Building for syzkaller
 echo "[+] Building syzkaller"
+# touch $CASE_PATH/.stamp/BUILD_SYZKALLER
 if [ ! -f "$CASE_PATH/.stamp/BUILD_SYZKALLER" ]; then
   if [ -d "$GOPATH/src/github.com/google/syzkaller" ]; then
-    rm -rf $GOPATH/src/github.com/google/syzkaller
+    # rm -rf $GOPATH/src/github.com/google/syzkaller
+    echo "syzkaller folder exist"
+  else
+    mkdir -p $GOPATH/src/github.com/google/ || echo "Dir exists"
+    cd $GOPATH/src/github.com/google/
+    echo $PROJECT_PATH
+    cp -r $PROJECT_PATH/tools/gopath/src/github.com/google/syzkaller ./
   fi
-  mkdir -p $GOPATH/src/github.com/google/ || echo "Dir exists"
-  cd $GOPATH/src/github.com/google/
-  cp -r $PROJECT_PATH/tools/gopath/src/github.com/google/syzkaller ./
-  #go get -u -d github.com/google/syzkaller/prog
-  #fi
+  # go get -u -d github.com/google/syzkaller/prog
   cd $GOPATH/src/github.com/google/syzkaller || exit 1
-  git stash --all || set_git_config
-  git checkout -f 9b1f3e665308ee2ddd5b3f35a078219b5c509cdb
-  make clean
-  #git checkout -
-  #retrieve_proper_patch
-  cp $PATCHES_PATH/syzkaller-9b1f3e6.patch ./syzkaller.patch
-  patch -p1 -i syzkaller.patch
-  #rm -r executor
-  #cp -r $PROJECT_PATH/tools/syzkaller/executor ./executor
-  make TARGETARCH=$ARCH TARGETVMARCH=amd64
+  # git stash --all || set_git_config
+  # if [ ! -d "/bin" ]; then
+  git checkout $SYZKALLER
+    # make clean
+    # git checkout -
+    # retrieve_proper_patch
+    # cp $PATCHES_PATH/syzkaller-9b1f3e6.patch ./syzkaller.patch
+    # patch -p1 -i syzkaller.patch
+    # rm -r executor
+    # cp -r $PROJECT_PATH/tools/syzkaller/executor ./executor
+  make -j$N_CORES TARGETARCH=$ARCH TARGETVMARCH=amd64
   if [ ! -d "workdir" ]; then
     mkdir workdir
   fi
-  # curl $TESTCASE > $GOPATH/src/github.com/google/syzkaller/workdir/testcase-$HASH
   touch $CASE_PATH/.stamp/BUILD_SYZKALLER
 fi
 
@@ -195,6 +198,7 @@ cd ..
 echo "[+] Building kernel"
 if [ ! -f "$CASE_PATH/.stamp/BUILD_KERNEL" ]; then
   cd linux
+
   if [ -e "vmlinux" ]; then
     echo "kernel build done"
     echo "rebuild please make clean"
@@ -275,11 +279,12 @@ CONFIG_BOOTPARAM_HUNG_TASK_PANIC
 
   make olddefconfig CC=$COMPILER
   #wait_for_other_compiling
-  make -j$N_CORES CC=$COMPILER > make.log 2>&1 || copy_log_then_exit make.log
+  # generate command
+  ulimit -n 4096
+  bear -- make -j$N_CORES CC=$COMPILER > make.log 2>&1 || copy_log_then_exit make.log
   rm $CASE_PATH/config || echo "It's ok"
   cp .config $CASE_PATH/config
   touch THIS_KERNEL_IS_BEING_USED
   touch $CASE_PATH/.stamp/BUILD_KERNEL
 fi
-
 exit 0

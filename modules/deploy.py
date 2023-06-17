@@ -13,8 +13,6 @@ from modules.crawler import syzbot_host_url, syzbot_bug_base_url
 from subprocess import call, Popen, PIPE, STDOUT
 from dateutil import parser as time_parser
 
-import ipdb
-
 stamp_build_syzkaller = "BUILD_SYZKALLER"
 stamp_build_kernel = "BUILD_KERNEL"
 stamp_reproduce_ori_poc = "REPRO_ORI_POC"
@@ -69,18 +67,18 @@ class Deployer():
     # 这里默认dump是True，就是要把相关环境文件统一保存在dump文件夹下面 
     self.dump = True
 
-  def init_logger(self, debug, hash_val=None):
+  def init_logger(self, hash_val=None):
     self.logger = logging.getLogger(__name__)
     for each in self.logger.handlers:
       self.logger.removeHandler(each)
     handler = logging.StreamHandler(sys.stdout)
     if hash_val != None:
-      format = logging.Formatter('%(asctime)s Thread 0: {} %(message)s'.format(hash_val))
+      format = logging.Formatter('%(asctime)s Thread: {} %(message)s'.format(hash_val))
     else:
-      format = logging.Formatter('%(asctime)s Thread 0: %(message)s')
+      format = logging.Formatter('%(asctime)s Thread: %(message)s')
     handler.setFormatter(format)
     self.logger.addHandler(handler)
-    if debug:
+    if self.debug:
       self.logger.setLevel(logging.DEBUG)
       self.logger.propagate = True
     else:
@@ -89,7 +87,7 @@ class Deployer():
   
   def setup_hash(self, hash_val):
     self.hash_val = hash_val
-    self.init_logger(self.debug, self.hash_val[:7])
+    self.init_logger(self.hash_val[:7])
 
   def __check_stamp(self, name, hash_val, folder):
     stamp_path1 = "{}/work/{}/{}/.stamp/{}".format(self.project_path, folder, hash_val, name)
@@ -135,7 +133,7 @@ class Deployer():
 
     self.compiler = utilities.set_compiler_version(time_parser.parse(case["time"]), case["config"])
     # impact_without_mutating = False
-    succeed = self.__create_dir_for_case()
+    self.__create_dir_for_case()
     if self.force:
       self.cleanup_built_kernel(hash_val)
       self.cleanup_built_syzkaller(hash_val)
@@ -192,8 +190,8 @@ class Deployer():
 
       shutil.copyfile(execprog_path, self.dump_path+"/syz-execprog")
       shutil.copyfile(executor_path, self.dump_path+"/syz-executor")
-      shutil.copyfile(vmlinux_path, self.dump_path+"/vmlinux")
-      shutil.copyfile(bzImage_path, self.dump_path+"/bzImage")
+      shutil.copyfile(vmlinux_path, self.dump_path+"/vmlinux-"+case["commit"][:7])
+      shutil.copyfile(bzImage_path, self.dump_path+"/bzImage-"+case["commit"][:7])
 
       if case['syz_repro']:
         req = requests.request(method='GET', url=case["syz_repro"])
@@ -556,6 +554,7 @@ class Deployer():
     target = os.path.join(self.package_path, "scripts/deploy.sh")
     chmodX(target)
     self.logger.info("run: scripts/deploy.sh")
+    import ipdb; ipdb.set_trace()
     p = Popen([target, 
                self.linux_folder, 
                hash_val, 
