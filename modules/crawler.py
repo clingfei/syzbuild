@@ -69,24 +69,27 @@ class Crawler:
             soup = BeautifulSoup(req.text, "html.parser")
 
         self.cases[hash]['title'] = self.get_title_of_case(soup)
-        # title 正确
         print("title: ", self.cases[hash]['title'])
-        # 似乎不需要patch
         patch = self.get_patch_of_case(soup)
         if patch is not None:
             self.cases[hash]['patch'] = patch
             print("patch: ", self.cases[hash]['patch'])
 
         tr = self.get_best_index(soup)
-        commits, syzkaller = self.get_commit_of_case(soup)
+        commits, syzkaller = self.get_commit_of_case(tr)
         if commits is None or syzkaller is None:
             print("Warning!!! commits or syzkaller is None in url: {}".format(url))
         else:
+            self.cases[hash]['url'] = url
             self.cases[hash]['commits'] = commits
             self.cases[hash]['syzkaller'] = syzkaller
             print('commits={}, syzkaller={}'.format(commits, syzkaller))
 
-        self.get_config_of_case(soup, url, path)
+        self.get_config_of_case(tr, url, path)
+        self.get_console_log_of_case(tr, url, path)
+        self.get_report_of_case(tr, url, path)
+        self.get_asserts_of_case(tr, path)
+        self.store_to_files(path, hash)
 
     def get_title_of_case(self, soup):
         if soup is None:
@@ -98,7 +101,7 @@ class Crawler:
     def get_patch_of_case(self, soup):
         patch = None
         mono = soup.find("span", {"class": "mono"})
-        if mono == None:
+        if mono is None:
             return patch
         try:
             patch = mono.contents[1].attrs['href']
@@ -106,7 +109,8 @@ class Crawler:
             pass
         return patch
 
-    # 选择upstream kernel， console Log对应的第一个下标，如果没有下标，则返回第一个
+    # select the first upstream kernel, console log
+    # we assume every vulnerability record will contain at least entry which can satisfy our demands
     def get_best_index(self, soup):
         tables = soup.find_all("table", {"class": "list_table"})
         for table in tables:
@@ -114,45 +118,87 @@ class Crawler:
                 if table.caption.contents[0].find("Crashes") != -1 and \
                         table.caption.contents[0].find("Crashes") is not None:
                     for tr in table.tbody.find_all('tr'):
-                        if tr.find("td", {"class": "kernel"}).contents[0] is "upstream" \
-                                and tr.find("td", {"class": "repro"}.contents[0]) is "console log":
+                        if tr.find("td", {"class": "kernel"}).contents[0] == "upstream" \
+                                and tr.find("td", {"class": "repro"}).contents[0].contents[0] == "console log":
                             return tr
 
-    def get_commit_of_case(self, soup):
-        commits = None
-        tables = soup.find_all("table", {"class": "list_table"})
-        for table in tables:
-            if table.caption is not None:
-                if table.caption.contents[0].find("Crashes") != -1 and \
-                        table.caption.contents[0].find("Crashes") is not None:
-                    cols = table.find_all("td", {"class": "tag"})
-                    for col in cols:
-                        if commits is None:
-                            commits = col.contents[0].contents[0]
-                        else:
-                            syzkaller = col.contents[0].contents[0]
-                            return commits, syzkaller
+    def get_commit_of_case(self, tr):
+        cols = tr.find_all("td", {"class": "tag"})
+        commits = cols[0].contents[0].contents[0]
+        syzkaller = cols[1].contents[0].contents[0]
+        return commits, syzkaller
 
-    def get_config_of_case(self, soup, url, path):
+    def get_config_of_case(self, tr, url, path):
         print(url)
-        tables = soup.find_all("table", {"class": "list_table"})
-        for table in tables:
-            if table.caption is not None:
-                if table.caption.contents[0].find("Crashes") != -1 and \
-                        table.caption.contents[0].find("Crashes") is not None:
-                    idx = url.index("bug")
-                    if idx == -1:
-                        print("Warning: bug not found in url!!!")
-                    else:
-                        prefix = url[:idx]
-                        config = table.find("td", {"class": "config"})
-                        new_url = prefix + config.contents[0].attrs['href']
-                        print(new_url)
-                        if path is not None:
-                            req = requests.request(method='GET', url=new_url)
-                            fd = os.open(path + '/.config', os.O_RDWR | os.O_CREAT)
-                            os.write(fd, req.text.encode())
-                            os.close(fd)
+        idx = url.index("bug")
+        if idx == -1:
+            print("Warning: bug not found in url!!!")
+        else:
+            prefix = url[:idx]
+            config = tr.find("td", {"class": "config"})
+            new_url = prefix + config.contents[0].attrs['href']
+            if path is not None:
+                req = requests.request(method='GET', url=new_url)
+                fd = os.open(path + '/.config', os.O_RDWR | os.O_CREAT)
+                os.write(fd, req.text.encode())
+                os.close(fd)
+
+    def get_console_log_of_case(self, tr, url, path):
+        idx = url.index("bug")
+        if idx == -1:
+            print("Warning: buf not found in url!!!")
+        else:
+            prefix = url[:idx]
+            console = tr.find("td", {"class": "repro"}).contents[0].attrs['href']
+            new_url = prefix + console
+            if path is not None:
+                print("console_log: ", new_url)
+                req = requests.request(method='GET', url=new_url)
+                fd = os.open(path + '/console_log', os.O_RDWR | os.O_CREAT)
+                os.write(fd, req.text.encode())
+                os.close(fd)
+
+    def get_report_of_case(self, tr, url, path):
+        idx = url.index("bug")
+        if idx == -1:
+            print("Warning: buf not found in url!!!")
+        else:
+            prefix = url[:idx]
+            reports = tr.find_all("td", {"class": "repro"})
+            for report in reports:
+                if report.contents[0].contents[0] == "report":
+                    new_url = prefix + report.contents[0].attrs['href']
+                    if path is not None:
+                        print("report url: ", new_url)
+                        req = requests.request(method='GET', url=new_url)
+                        fd = os.open(path + '/report', os.O_RDWR | os.O_CREAT)
+                        os.write(fd, req.text.encode())
+                        os.close(fd)
+                        return
+
+    def get_asserts_of_case(self, tr, path):
+        assets = tr.find("td", {"class": "assets"})
+        if assets is None:
+            return
+        spans = assets.find_all("span", {"class": "no-break"})
+        for span in spans:
+            os.chdir(path)
+            os.system("wget " + span.contents[1].attrs['href'])
+            print(span.contents[1].attrs['href'])
+
+    def store_to_files(self, path, hash):
+        os.chdir(path)
+        os.system("echo " + self.cases[hash]['url'] + " > url")
+        os.system("echo " + self.cases[hash]['syzkaller'] + " > syzkaller")
+        os.system("echo " + self.cases[hash]['title'] + " > description")
+        print(path + "/kernel")
+        os.system("cp -r /home/dubbo/linux " + path + "/kernel")
+        os.system("cd " + path + "/kernel")
+        print(os.getcwd())
+        print("git reset " + self.cases[hash]['commits'])
+        os.chdir(path + "/" + "kernel")
+        os.system("git reset --hard " + self.cases[hash]['commits'])
+        os.system("mv ../.config .")
 
     # def get_title_of_case(self, url, hash=None, text=None):
     #     if hash == None and text == None:
