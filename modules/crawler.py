@@ -130,7 +130,6 @@ class Crawler:
         return commits, syzkaller
 
     def get_config_of_case(self, tr, url):
-        print(url)
         idx = url.index("bug")
         if idx == -1:
             print("Warning: bug not found in url!!!")
@@ -140,9 +139,9 @@ class Crawler:
             new_url = prefix + config.contents[0].attrs['href']
             if self.dst is not None:
                 req = requests.request(method='GET', url=new_url)
-                fd = os.open(os.path.join(self.dst, 'config'), os.O_RDWR | os.O_CREAT)
-                os.write(fd, req.text.encode())
-                os.close(fd)
+                with os.open(os.path.join(self.dst, 'config'), os.O_RDWR | os.O_CREAT) as fd:
+                    os.write(fd, req.text.encode())
+                    os.close(fd)
 
     def get_console_log_of_case(self, tr, url):
         idx = url.index("bug")
@@ -155,9 +154,9 @@ class Crawler:
             if self.dst is not None:
                 print("[+] console_log: ", new_url)
                 req = requests.request(method='GET', url=new_url)
-                fd = os.open(os.path.join(self.dst, 'console_log'), os.O_RDWR | os.O_CREAT)
-                os.write(fd, req.text.encode())
-                os.close(fd)
+                with os.open(os.path.join(self.dst, 'console_log'), os.O_RDWR | os.O_CREAT) as fd:
+                    os.write(fd, req.text.encode())
+                    os.close(fd)
 
     def get_report_of_case(self, tr, url):
         idx = url.index("bug")
@@ -171,9 +170,9 @@ class Crawler:
                     new_url = prefix + report.contents[0].attrs['href']
                     print("[+] report url: ", new_url)
                     req = requests.request(method='GET', url=new_url)
-                    fd = os.open(os.path.join(self.dst, 'report'), os.O_RDWR | os.O_CREAT)
-                    os.write(fd, req.text.encode())
-                    os.close(fd)
+                    with os.open(os.path.join(self.dst, 'report'), os.O_RDWR | os.O_CREAT) as fd:
+                        os.write(fd, req.text.encode())
+                        os.close(fd)
                     return
 
     def get_asserts_of_case(self, tr):
@@ -185,6 +184,10 @@ class Crawler:
             os.chdir(self.dst)
             os.system("wget " + span.contents[1].attrs['href'])
             print(span.contents[1].attrs['href'])
+
+    def get_gcc_version_from_config(self):
+        pass
+
 
     def store_to_files(self, hash):
         os.chdir(self.dst)

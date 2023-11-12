@@ -204,7 +204,6 @@ if __name__ == '__main__':
 
     # NOTE: checking and building workdir
     args.dst = os.path.join(args.dst+ hash[:8])
-    import ipdb; ipdb.set_trace()
     try:
         os.mkdir(args.dst)
     except FileExistsError:
