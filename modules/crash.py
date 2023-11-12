@@ -71,7 +71,7 @@ class Crasher:
             if self.compare_crashes(ori_crash_report, new_crash_reports):
                 return [True, path]
         return [False, None]
-    
+
     def check_read_before_write(self, path):
         new_crash_reports = self.read_existed_crash(path)
         for each_report in new_crash_reports:
@@ -80,7 +80,7 @@ class Crasher:
                     return True
         return False
 
-    
+
     def diff_testcase(self, crash_path, syz_repro):
         new_testcase = []
         old_testcase = []
@@ -98,7 +98,7 @@ class Crasher:
                 old_testcase.append(line)
         return utilities.levenshtein("\n".join(old_testcase), "\n".join(new_testcase))
 
-    
+
     def repro_on_fixed_kernel(self, syz_commit, linux_commit=None, config=None, c_repro=None, i386=None, patch_commit=None, crashes_path=None, limitedMutation=False):
         if crashes_path == None:
             crashes_path = self.extract_existed_crash(self.case_path)
@@ -154,7 +154,7 @@ class Crasher:
                     self.logger.info("Suspicious crash: {} triggered a crash but doesn't belong to OOB/UAF write".format(key))
         exitcode = self.deploy_linux(linux_commit, config, 0)
         return res
-    
+
     def patch_applying_check(self, linux_commit, config, patch_commit):
         target = os.path.join(self.package_path, "scripts/patch_applying_check.sh")
         utilities.chmodX(target)
@@ -165,7 +165,7 @@ class Crasher:
             self.__log_subprocess_output(p.stdout, logging.INFO)
         exitcode = p.wait()
         return exitcode
-    
+
     def read_kasan_funcs(self):
         res = []
         path = os.path.join(self.package_path, "resources/kasan_related_funcs")
@@ -184,7 +184,7 @@ class Crasher:
             if len(report1) > 2:
                 for report2 in new_crash_reports:
                     if len(report2) > 2:
-                        res1 = self.__match_allocated_section(report1, report2)     
+                        res1 = self.__match_allocated_section(report1, report2)
                         res2 = self.__match_call_trace(report1, report2)
                         if ratio_allocation > res1[1]:
                             ratio_allocation = res1[1]
@@ -223,7 +223,7 @@ class Crasher:
                             res.append(os.path.join(crash_path, case))
                             continue
         return res
-    
+
     def read_crash(self, syz_repro, syz_commit, log, fixed, c_repro, i386):
         self.kill_qemu = False
         res = []
@@ -266,7 +266,7 @@ class Crasher:
             self.logger.error(res[0])
             return [], trigger
         return res, trigger
-    
+
     def read_existed_crash(self, crash_path):
         res = []
         crash = []
@@ -316,14 +316,14 @@ class Crasher:
             if record_flag and kasan_flag:
                 crash.append(line)
         return res
-        
+
     def save_crash_log(self, log, name):
         with open("{}/poc/crash_log-{}".format(self.case_path, name), "w+") as f:
             for each in log:
                 for line in each:
                     f.write(line+"\n")
                 f.write("\n")
-    
+
     def deploy_linux(self, commit, config, fixed):
         target = os.path.join(self.package_path, "scripts/deploy_linux.sh")
         utilities.chmodX(target)
@@ -349,7 +349,7 @@ class Crasher:
         qemu = VM(hash_tag=c_hash, linux=self.linux_path, port=self.ssh_port+th_index, image=self.image_path, proj_path="{}/poc/".format(self.case_path) ,log_name="qemu-{}.log".format(c_hash), log_suffix=str(th_index), timeout=10*60, debug=self.debug)
         qemu.qemu_logger.info("QEMU-{} launched. Fixed={}\n".format(th_index, fixed))
         p = qemu.run()
-        
+
         extract_report = False
         qemu_close = False
         out_begin = 0
@@ -393,7 +393,7 @@ class Crasher:
                                     if double_free_flag:
                                         self.logger.debug("QEMU threaded {}: Double free triggered".format(th_index))
                                     if read_flag:
-                                        self.logger.debug("QEMU threaded {}: OOB/UAF read triggered".format(th_index))                       
+                                        self.logger.debug("QEMU threaded {}: OOB/UAF read triggered".format(th_index))
                                     break
                             record_flag = 1
                             continue
@@ -434,7 +434,7 @@ class Crasher:
         if exitcode != 2 and exitcode != 3:
             return 0
         return exitcode
-    
+
     def upload_custom_exp(self, path, port, logger=None):
         p = Popen(["scp", "-F", "/dev/null", "-o", "UserKnownHostsFile=/dev/null", \
             "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", \
@@ -446,7 +446,7 @@ class Crasher:
                 log_anything(p.stdout, logger, self.debug)
         exitcode = p.wait()
         return exitcode
-    
+
     def run_exp(self, syz_repro, port, repro_type, exitcode, i386, th_index, logger=None):
         if repro_type == utilities.URL:
             r = utilities.request_get(syz_repro)
@@ -478,10 +478,10 @@ class Crasher:
         if exitcode == 1:
             self.case_logger.error("QEMU threaded {}: Usually, there is no reproducer in the crash".format(th_index))
             return 0
-        
-        p2 = Popen(["ssh", "-F", "/dev/null", "-o", "UserKnownHostsFile=/dev/null", 
-        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", 
-        "-i", "{}/stretch.img.key".format(self.image_path), 
+
+        p2 = Popen(["ssh", "-F", "/dev/null", "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no",
+        "-i", "{}/stretch.img.key".format(self.image_path),
         "-p", str(port), "root@localhost", "chmod +x run.sh && ./run.sh "+str(th_index & 1)],
         stdout=PIPE,
         stderr=STDOUT)
@@ -490,17 +490,17 @@ class Crasher:
                 x = threading.Thread(target=log_anything, args=(p2.stdout, logger, self.debug), name="{} run.sh logger".format(th_index))
                 x.start()
         """
-        call(["ssh", "-F", "/dev/null", "-o", "UserKnownHostsFile=/dev/null", 
-        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", 
-        "-i", "{}/stretch.img.key".format(self.image_path), 
+        call(["ssh", "-F", "/dev/null", "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no",
+        "-i", "{}/stretch.img.key".format(self.image_path),
         "-p", str(port), "root@localhost", "chmod +x run.sh && ./run.sh "+str(th_index & 1)])
         """
         return 1
-    
+
     def run_custom_exp(self, port, logger=None):
-        p2 = Popen(["ssh", "-F", "/dev/null", "-o", "UserKnownHostsFile=/dev/null", 
-        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", 
-        "-i", "{}/stretch.img.key".format(self.image_path), 
+        p2 = Popen(["ssh", "-F", "/dev/null", "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no",
+        "-i", "{}/stretch.img.key".format(self.image_path),
         "-p", str(port), "root@localhost", "./poc"],
         stdout=PIPE,
         stderr=STDOUT)
@@ -546,7 +546,7 @@ class Crasher:
                 if "fault_call" in pm and pm["fault_call"] != "":
                     command += "-fault_call=" + str(pm["fault_call"]) + " "
                 #It makes no sense that limiting the features of syz-execrpog, just enable them all
-                
+
                 if support_enable_features != 2:
                     if "tun" in pm and str(pm["tun"]).lower() == "true":
                         enabled += "tun,"
@@ -571,15 +571,15 @@ class Crasher:
                     if "vhci" in pm and str(pm["vhci"]).lower() == "true":
                         enabled += "vhci,"
                     if "wifi" in pm and str(pm["wifi"]).lower() == "true":
-                        enabled += "wifi," 
-                
+                        enabled += "wifi,"
+
                 if enabled[-1] == ',':
                     command += enabled[:-1] + " testcase"
                 else:
                     command += "testcase"
                 break
         return command
-    
+
     def monitor_execution(self, p):
         count = 0
         while (count <60):
@@ -594,7 +594,7 @@ class Crasher:
                 return
         self.case_logger.info('Time out, kill qemu')
         p.kill()
-            
+
     def __match_allocated_section(self, report1 ,report2):
         self.case_logger.info("match allocated section")
         ratio = 1
@@ -624,7 +624,7 @@ class Crasher:
         if ratio > 0.3:
             return [False, ratio]
         return [True, ratio]
-    
+
     def __match_call_trace(self, report1, report2):
         self.case_logger.info("match call trace")
         ratio = 1
@@ -654,7 +654,7 @@ class Crasher:
         if ratio > 0.3:
             return [False, ratio]
         return [True, ratio]
-    
+
     def __init_case_logger(self, logger_name):
         handler = logging.FileHandler("{}/poc/log".format(self.case_path))
         format = logging.Formatter('%(asctime)s %(message)s')
@@ -666,7 +666,7 @@ class Crasher:
         if self.debug:
             logger.propagate = True
         return logger
-    
+
     def __log_subprocess_output(self, pipe, log_level):
         for line in iter(pipe.readline, b''):
             line = line.decode("utf-8").strip('\n').strip('\r')
@@ -740,7 +740,7 @@ def reproduce_with_ori_poc(index):
         #logger = logging.getLogger('crash-{}'.format(hash))
         #formatter = logging.Formatter('%(asctime)s Thread {}: {}: %(message)s'.format(index, hash[:7]))
         #hdlr.setFormatter(formatter)
-        #logger.addHandler(hdlr) 
+        #logger.addHandler(hdlr)
         #logger.setLevel(logging.INFO)
         logger = logging.getLogger("thread-{}".format(index))
         handler = logging.StreamHandler(sys.stdout)
@@ -809,7 +809,7 @@ def reproduce_one_case(index):
         #logger = logging.getLogger('crash-{}'.format(hash))
         #formatter = logging.Formatter('%(asctime)s Thread {}: {}: %(message)s'.format(index, hash[:7]))
         #hdlr.setFormatter(formatter)
-        #logger.addHandler(hdlr) 
+        #logger.addHandler(hdlr)
         #logger.setLevel(logging.INFO)
 
         logger = logging.getLogger("case-{}".format(hash))
@@ -922,7 +922,7 @@ if __name__ == '__main__':
         for url in utilities.urlsOfCases(path, type):
             if url not in ignore:
                 crawler.run_one_case(url)
-    
+
     project_path = os.getcwd()
     lock = threading.Lock()
     l = list(crawler.cases.keys())
@@ -936,4 +936,3 @@ if __name__ == '__main__':
     for i in range(min(len(crawler.cases), parallel_max)):
         x = threading.Thread(target=thread_fn, args=(i,))
         x.start()
-        

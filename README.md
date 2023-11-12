@@ -11,14 +11,14 @@
 
 使用方法：
 
-```sh
+```shell
 proxychains python3 main.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd
 ```
 最好挂上代理，不然clone不下来
 成功将会在`work/completed/hash/dump`下生成所有上述所需
 
 
-```sh
+```shell
 -u 指定爬取的url
 --debug 打印log
 --force 无论如何删除原始环境重新构建

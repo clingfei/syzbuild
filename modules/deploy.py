@@ -18,7 +18,7 @@ stamp_build_kernel = "BUILD_KERNEL"
 stamp_reproduce_ori_poc = "REPRO_ORI_POC"
 
 syz_config_template="""
-{{ 
+{{
   "target": "linux/amd64/{8}",
   "http": "127.0.0.1:{5}",
   "workdir": "{0}/workdir",
@@ -44,7 +44,7 @@ syz_config_template="""
 }}"""
 
 class Deployer():
-  def __init__(self, index=0, debug=False, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700): 
+  def __init__(self, index=0, debug=False, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700):
     """
     index: table中的第几个,默认是第0个,因为其他的还没有实现
     debug: 是否开启log
@@ -63,8 +63,8 @@ class Deployer():
     # if self.max <8 :
     #   self.max = 8
     self.max = -1
-    
-    # 这里默认dump是True，就是要把相关环境文件统一保存在dump文件夹下面 
+
+    # 这里默认dump是True，就是要把相关环境文件统一保存在dump文件夹下面
     self.dump = True
 
   def init_logger(self, hash_val=None):
@@ -84,7 +84,7 @@ class Deployer():
     else:
       self.logger.setLevel(logging.INFO)
       self.logger.propagate = False
-  
+
   def setup_hash(self, hash_val):
     self.hash_val = hash_val
     self.init_logger(self.hash_val[:7])
@@ -142,14 +142,14 @@ class Deployer():
     i386 = None
     if utilities.regx_match(r'386', case["manager"]):
       i386 = True
-    
+
     # self.init_crash_checker(self.ssh_port)
-    
+
     self.linux_addr = case['kernel']
     # TODO: 这里直接clone新的linux，不做复用
     self.linux_folder = self.kernel_path
     if os.path.exists(self.linux_folder):
-      self.logger.info("linux cloned folder existed!\n") 
+      self.logger.info("linux cloned folder existed!\n")
     else:
       self.__run_linux_clone_script()
 
@@ -196,22 +196,22 @@ class Deployer():
         req = requests.request(method='GET', url=case["syz_repro"])
         with open(self.dump_path+"/"+str(self.index)+".prog", "wb") as f:
           f.write(req.content)
-      
+
       if case['c_repro']:
         req = requests.request(method='GET', url=case["c_repro"])
         with open(self.dump_path+"/"+str(self.index)+".c", "wb") as f:
           f.write(req.content)
-        
+
       if case['log']:
         req = requests.request(method='GET', url=case["log"])
         with open(self.dump_path+"/log", "wb") as f:
           f.write(req.content)
-      
+
       if case['report']:
         req = requests.request(method='GET', url=case["report"])
         with open(self.dump_path+"/report", "wb") as f:
           f.write(req.content)
-      
+
       # succeed = 1
 
     # if succeed:
@@ -220,7 +220,7 @@ class Deployer():
     #   self.__save_error(hash_val)
     # else:
     self.__move_to_completed()
-    
+
   def run_syzkaller(self, hash_val, limitedMutation):
     self.logger.info("run syzkaller".format(self.index))
     syzkaller = os.path.join(self.syzkaller_path, "bin/syz-manager")
@@ -229,9 +229,9 @@ class Deployer():
     # If failed to trigger a write crash, we enable more syscalls to run it again
     for _ in range(0, 3):
       if self.logger.level == logging.DEBUG:
-        p = Popen([syzkaller, 
-                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), 
-                   "-debug", 
+        p = Popen([syzkaller,
+                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]),
+                   "-debug",
                    "-poc"
                   ],
               stdout=PIPE,
@@ -242,8 +242,8 @@ class Deployer():
         exitcode = p.wait()
 
         if not limitedMutation:
-          p = Popen([syzkaller, 
-                     "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7]), 
+          p = Popen([syzkaller,
+                     "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7]),
                      "-debug"
                     ],
               stdout=PIPE,
@@ -254,7 +254,7 @@ class Deployer():
         exitcode = p.wait()
       else:
         p = Popen([syzkaller,
-                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]), 
+                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]),
                    "-poc"
                   ],
             stdout = PIPE,
@@ -281,7 +281,7 @@ class Deployer():
       if self.correctTemplate() and self.compileTemplate():
         exitcode = self.run_syzkaller(hash_val, limitedMutation)
     return exitcode
-  
+
   def compileTemplate(self):
     target = os.path.join(self.package_path, "scripts/syz-compile.sh")
     chmodX(target)
@@ -295,7 +295,7 @@ class Deployer():
     exitcode = p.wait()
     self.logger.info("script/syz-compile.sh is done with exitcode {}".format(exitcode))
     return exitcode == 0
-  
+
   def correctTemplate(self):
     find_it = False
     pattern_type = utilities.SYSCALL
@@ -310,7 +310,7 @@ class Deployer():
             return find_it
     except:
         return find_it
-    
+
     if text.find('syscall:') != -1:
         pattern = text.split(':')[1]
         pattern_type = utilities.SYSCALL
@@ -323,7 +323,7 @@ class Deployer():
             pattern = "type " + pattern[:i]
         else:
             pattern = pattern + " {"
-    
+
     search_path="sys/linux"
     extension=".txt"
     ori_syzkaller_path = os.path.join(self.current_case_path, "poc/gopath/src/github.com/google/syzkaller")
@@ -337,7 +337,7 @@ class Deployer():
       find_it = False
       data = []
       target_file = ''
-      brackets = -1 #-1 means no '{' found ever 
+      brackets = -1 #-1 means no '{' found ever
 
       if not os.path.isdir(src):
           self.logger.info("{} do not exist".format(src))
@@ -373,7 +373,7 @@ class Deployer():
               if find_it:
                   target_file = file_name
                   break
-      
+
       if not os.path.isdir(dst):
           self.logger.info("{} do not exist".format(dst))
           return False
@@ -392,12 +392,12 @@ class Deployer():
                       start = i
                       find_it = True
                       continue
-                  
+
                   if find_it:
                       end = i
                       if pattern_type == utilities.SYSCALL or (pattern_type == utilities.STRUCT and line == "\n"):
                           break
-          
+
               if find_it:
                   f = open(os.path.join(dst, file_name), "w")
                   new_data = []
@@ -450,11 +450,11 @@ class Deployer():
 
   def extractStruct(self, text):
     trivial_type = ["int8", "int16", "int32", "int64", "int16be", "int32be", "int64be", "intptr",
-                    "in", "out", "inout", "dec", "hex", "oct", "fmt", "string", "target", 
+                    "in", "out", "inout", "dec", "hex", "oct", "fmt", "string", "target",
                     "x86_real", "x86_16", "x86_32", "x86_64", "arm64", "text", "proc", "ptr", "ptr64",
                     "inet", "pseudo", "csum", "vma", "vma64", "flags", "const", "array", "void"
                     "len", "bytesize", "bytesize2", "bytesize4", "bytesize8", "bitsize", "offsetof"]
-  
+
   def confirmSuccess(self, hash_val, case, limitedMutation=False):
       syz_repro = case["syz_repro"]
       syz_commit = case["syzkaller"]
@@ -491,7 +491,7 @@ class Deployer():
           res = self.deduplicate_ori(res, syz_repro)
           return res
       return []
-  
+
   def deduplicate_ori(self, paths, ori_prog):
     res = []
     for each in paths:
@@ -508,7 +508,7 @@ class Deployer():
         continue
       res.append(each)
     return res
-  
+
   def repro_on_fixed_kernel(self, hash_val, case, crashes_path=None, limitedMutation=False):
     syz_repro = case["syz_repro"]
     syz_commit = case["syzkaller"]
@@ -523,13 +523,13 @@ class Deployer():
     if commit != None:
       res = self.crash_checker.repro_on_fixed_kernel(syz_commit, case["commit"], config, c_repro, i386, commit, crashes_path=crashes_path, limitedMutation=limitedMutation)
     return res
-  
+
   def save_case(self, hash_val, exitcode, case, limitedMutation, impact_without_mutating, title=None, secondary_fuzzing=False):
     return self.__save_case(hash_val=hash_val, exitcode=exitcode, case=case, limitedMutation=limitedMutation, impact_without_mutating=impact_without_mutating, title=title, secondary_fuzzing=secondary_fuzzing)
 
   def __check_confirmed(self, hash_val):
     return False
-  
+
   def __run_linux_clone_script(self):
     chmodX("scripts/linux-clone.sh")
     self.logger.info("run: scripts/linux-clone.sh {} {}".format(self.linux_addr, self.kernel_path))
@@ -553,16 +553,16 @@ class Deployer():
     target = os.path.join(self.package_path, "scripts/deploy.sh")
     chmodX(target)
     self.logger.info("run: scripts/deploy.sh")
-    p = Popen([target, 
-               self.linux_folder, 
-               hash_val, 
-               commit, 
-               syzkaller, 
-               config, 
-               self.catalog, 
-               image, 
-               self.arch, 
-               self.compiler, 
+    p = Popen([target,
+               self.linux_folder,
+               hash_val,
+               commit,
+               syzkaller,
+               config,
+               self.catalog,
+               image,
+               self.arch,
+               self.compiler,
                str(self.max)
               ],
               stdout=PIPE,
@@ -588,16 +588,16 @@ class Deployer():
     new_syscalls.extend(dependent_syscalls)
     new_syscalls = utilities.unique(new_syscalls)
     enable_syscalls = "\"" + "\",\n\t\"".join(new_syscalls) + "\""
-    syz_config = syz_config_template.format(self.syzkaller_path, 
-                                            self.kernel_path, 
-                                            self.image_path, 
-                                            enable_syscalls, 
-                                            hash_val, 
-                                            self.ssh_port, 
-                                            self.current_case_path, 
-                                            self.time_limit, 
-                                            self.arch, 
-                                            self.max_qemu_for_one_case, 
+    syz_config = syz_config_template.format(self.syzkaller_path,
+                                            self.kernel_path,
+                                            self.image_path,
+                                            enable_syscalls,
+                                            hash_val,
+                                            self.ssh_port,
+                                            self.current_case_path,
+                                            self.time_limit,
+                                            self.arch,
+                                            self.max_qemu_for_one_case,
                                             str(self.store_read).lower()
                                             )
     f = open(os.path.join(self.syzkaller_path, "workdir/{}-poc.cfg".format(hash_val)), "w")
@@ -683,7 +683,7 @@ class Deployer():
             if upper_bound and lower_bound:
               return res
     return res
-      
+
   def __extract_all_syscalls(self, last_syscall, syzkaller_path, search_path="sys/linux", extension=".txt"):
       res = []
       dir = os.path.join(syzkaller_path, search_path)
@@ -710,7 +710,7 @@ class Deployer():
                     res.append(syscall)
                 break
       return res
-  
+
   def __extract_raw_syscall(self, syscalls):
     res = []
     for call in syscalls:
@@ -786,7 +786,7 @@ class Deployer():
           if os.path.exists(dst):
               shutil.rmtree(dst)
           shutil.copytree(path, dst)
-  
+
   def __trigger_alert(self, name, alert_key):
       self.logger.info("An alert for {} was trigger by crash {}".format(alert_key, name))
 
@@ -825,7 +825,7 @@ class Deployer():
         self.logger.info("Fail to delete directory {}".format(des))
     shutil.move(src, des)
     self.current_case_path = des
-  
+
   def __move_to_succeed(self, new_impact_type):
     self.logger.info("Copy to succeed")
     src = self.current_case_path
@@ -843,7 +843,7 @@ class Deployer():
         self.logger.info("Fail to delete directory {}".format(des))
     shutil.move(src, des)
     self.current_case_path = des
-  
+
   def __move_to_error(self):
     self.logger.info("Copy to error")
     src = self.current_case_path
@@ -883,7 +883,7 @@ class Deployer():
         except:
           self.logger.info("Fail to copy the duplicated case from {}".format(src))
     return False, False
-  
+
   def __get_default_log_format(self):
       return logging.Formatter('%(asctime)s %(levelname)s  %(message)s')
 
@@ -898,7 +898,7 @@ class Deployer():
       if self.debug:
           logger.propagate = True
       return logger
-  
+
   def __log_subprocess_output(self, pipe, log_level):
       for line in iter(pipe.readline, b''):
           if log_level == logging.INFO:
@@ -929,10 +929,10 @@ class Deployer():
               if line == hash_val:
                   return True
       return False
-  
+
   def __need_kasan_patch(self, title):
     return utilities.regx_match(r'slab-out-of-bounds Read', title)
-  
+
   def __distill_testcase(self, text):
       res = ''
       text = text.split('\n')

@@ -16,13 +16,17 @@ supports = {
     1: syzbot_bug_ext_url
 }
 
+UPSTREAM_LINUX = "/home/inspur/foorbar/linux"
+
 
 class Crawler:
     def __init__(self,
-                 url="https://syzkaller.appspot.com/",
+                 dst,
+                 url,
                  debug=False):
 
         self.url = url
+        self.dst = dst
         self.cases = {}
         self.patches = {}
         self.commits = None
@@ -44,19 +48,12 @@ class Crawler:
             self.logger.propagate = False
         self.logger.addHandler(handler)
 
-    def run_one_case(self, hash, flag):
+    def run_one_case(self, hash, url_flag, assets_flag, logs_flag):
         # self.logger.info("retrieve one case: %s", hash)
-        path = None
         try:
-            bug_url = supports[flag]
+            bug_url = supports[url_flag]
             self.logger.debug("{}{}{}".format(syzbot_host_url, bug_url, hash))
             url = syzbot_host_url + bug_url + hash
-            print("url=", url, "hash=", hash)
-            path = os.getcwd() + '/' + hash[:8]
-            try:
-                os.mkdir(os.getcwd() + '/' + hash[:8])
-            except:
-                pass
         except IndexError:
             print("url not support")
             return
@@ -85,11 +82,12 @@ class Crawler:
             self.cases[hash]['syzkaller'] = syzkaller
             print('commits={}, syzkaller={}'.format(commits, syzkaller))
 
-        self.get_config_of_case(tr, url, path)
-        self.get_console_log_of_case(tr, url, path)
-        self.get_report_of_case(tr, url, path)
-        self.get_asserts_of_case(tr, path)
-        self.store_to_files(path, hash)
+        self.get_config_of_case(tr, url)
+        self.get_console_log_of_case(tr, url)
+        self.get_report_of_case(tr, url)
+        if assets_flag:
+            self.get_asserts_of_case(tr)
+        self.store_to_files(hash)
 
     def get_title_of_case(self, soup):
         if soup is None:
@@ -117,6 +115,8 @@ class Crawler:
             if table.caption is not None:
                 if table.caption.contents[0].find("Crashes") != -1 and \
                         table.caption.contents[0].find("Crashes") is not None:
+                    # FIXME: consider this is no upstream kernel crash
+                    # like https://syzkaller.appspot.com/bug?extid=c53d4d3ddb327e80bc51
                     for tr in table.tbody.find_all('tr'):
                         if tr.find("td", {"class": "kernel"}).contents[0] == "upstream" \
                                 and tr.find("td", {"class": "repro"}).contents[0].contents[0] == "console log":
@@ -128,7 +128,7 @@ class Crawler:
         syzkaller = cols[1].contents[0].contents[0]
         return commits, syzkaller
 
-    def get_config_of_case(self, tr, url, path):
+    def get_config_of_case(self, tr, url):
         print(url)
         idx = url.index("bug")
         if idx == -1:
@@ -137,13 +137,13 @@ class Crawler:
             prefix = url[:idx]
             config = tr.find("td", {"class": "config"})
             new_url = prefix + config.contents[0].attrs['href']
-            if path is not None:
+            if self.dst is not None:
                 req = requests.request(method='GET', url=new_url)
-                fd = os.open(path + '/.config', os.O_RDWR | os.O_CREAT)
+                fd = os.open(os.path.join(self.dst, 'config'), os.O_RDWR | os.O_CREAT)
                 os.write(fd, req.text.encode())
                 os.close(fd)
 
-    def get_console_log_of_case(self, tr, url, path):
+    def get_console_log_of_case(self, tr, url):
         idx = url.index("bug")
         if idx == -1:
             print("Warning: buf not found in url!!!")
@@ -151,14 +151,14 @@ class Crawler:
             prefix = url[:idx]
             console = tr.find("td", {"class": "repro"}).contents[0].attrs['href']
             new_url = prefix + console
-            if path is not None:
+            if self.dst is not None:
                 print("console_log: ", new_url)
                 req = requests.request(method='GET', url=new_url)
-                fd = os.open(path + '/console_log', os.O_RDWR | os.O_CREAT)
+                fd = os.open(os.path.join(self.dst, 'console_log'), os.O_RDWR | os.O_CREAT)
                 os.write(fd, req.text.encode())
                 os.close(fd)
 
-    def get_report_of_case(self, tr, url, path):
+    def get_report_of_case(self, tr, url):
         idx = url.index("bug")
         if idx == -1:
             print("Warning: buf not found in url!!!")
@@ -168,35 +168,36 @@ class Crawler:
             for report in reports:
                 if report.contents[0].contents[0] == "report":
                     new_url = prefix + report.contents[0].attrs['href']
-                    if path is not None:
-                        print("report url: ", new_url)
-                        req = requests.request(method='GET', url=new_url)
-                        fd = os.open(path + '/report', os.O_RDWR | os.O_CREAT)
-                        os.write(fd, req.text.encode())
-                        os.close(fd)
-                        return
+                    print("report url: ", new_url)
+                    req = requests.request(method='GET', url=new_url)
+                    fd = os.open(os.path.join(self.dst, 'report'), os.O_RDWR | os.O_CREAT)
+                    os.write(fd, req.text.encode())
+                    os.close(fd)
+                    return
 
-    def get_asserts_of_case(self, tr, path):
+    def get_asserts_of_case(self, tr):
         assets = tr.find("td", {"class": "assets"})
         if assets is None:
             return
         spans = assets.find_all("span", {"class": "no-break"})
         for span in spans:
-            os.chdir(path)
+            os.chdir(self.dst)
             os.system("wget " + span.contents[1].attrs['href'])
             print(span.contents[1].attrs['href'])
 
-    def store_to_files(self, path, hash):
-        os.chdir(path)
+    def store_to_files(self, hash):
+        os.chdir(self.dst)
         os.system("echo " + self.cases[hash]['url'] + " > url")
         os.system("echo " + self.cases[hash]['syzkaller'] + " > syzkaller")
         os.system("echo " + self.cases[hash]['title'] + " > description")
-        print(path + "/kernel")
-        os.system("cp -r /home/dubbo/linux " + path + "/kernel")
-        os.system("cd " + path + "/kernel")
+        print(self.dst + "/kernel")
+        # FIXME: hard-coded linux
+        os.system("cp -r /home/inspur/foobar/linux " + self.dst + "/kernel")
+        os.system("cd " + self.dst + "/kernel")
         print(os.getcwd())
         print("git reset " + self.cases[hash]['commits'])
-        os.chdir(path + "/" + "kernel")
+        # FIXME: hard-coded syzkaller
+        os.chdir(self.dst + "/" + "kernel")
         os.system("git reset --hard " + self.cases[hash]['commits'])
         os.system("mv ../.config .")
 

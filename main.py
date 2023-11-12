@@ -5,8 +5,6 @@ import multiprocessing, threading
 import logging
 import gc
 
-# import ipdb
-
 sys.path.append(os.getcwd())
 from modules import Crawler, Deployer
 from subprocess import call
@@ -15,19 +13,15 @@ from modules.utilities import urlsOfCases, urlsOfCases, FOLDER, CASE
 
 def args_parse():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
-                                     description='Deploy crash cases from syzbot\n'
-                                                 'eg. python syzscope -u https://syzkaller.appspot.com/bug?id=0ca897284a4e1bbc149ad96f15917e8b31a85d70\n')
-    parser.add_argument('-u', '--url', nargs='?', action='store',
-                        help='Indicate an URL for automatically crawling and running.\n'')')
-    parser.add_argument('--install-requirements', action='store_true',
-                        help='Install required packages and compile essential tools')
-    parser.add_argument('--debug', action='store_true',
-                        help='Enable debug mode')
-    parser.add_argument('--force', action='store_true',
-                        help='Force to run all cases even it has finished\n')
-    parser.add_argument('-M', '--max', nargs='?',
-                        default='-1',
-                        help='maximum of kernel that compiling at the same time. Default is unlimited.')
+                                     description='Deploy crash cases from syzbot\n')
+    parser.add_argument('-u', '--url', nargs='?', action='store', help='the url for automatically crawling and building.\n'')')
+    parser.add_argument('-d', '--dst', nargs='?', action='store', help='destination to store.\n'')')
+    parser.add_argument("--logs",   action="store_true", default=False, help="crawling all the logs from the url, default=false.\n")
+    parser.add_argument("--assets", action="store_true", default=False, help="crawling assets or not, default=false.\n")
+    parser.add_argument('--install-requirements', action='store_true',  help='Install required packages and compile essential tools')
+    parser.add_argument('--debug', action='store_true', help='enable debug mode')
+    parser.add_argument('--force', action='store_true', help='Force to run all cases even it has finished\n')
+    parser.add_argument('--max', nargs='?', default='-1', help='maximum of kernel that compiling at the same time. Default is unlimited.')
 
     args = parser.parse_args()
     return args
@@ -76,6 +70,7 @@ def deploy_one_case(args, hash_val):
 
 # multiprocessing
 def prepare_cases(index, args):
+    lock = threading.Lock()
     while (1):
         lock.acquire(blocking=True)
         try:
@@ -151,15 +146,6 @@ def check_requirements():
     return os.path.isfile(env_stamp)
 
 
-def build_work_dir():
-    work_path = os.path.join(os.getcwd(), "work")
-    os.makedirs(work_path, exist_ok=True)
-    incomp = os.path.join(work_path, "incomplete")
-    comp = os.path.join(work_path, "completed")
-    os.makedirs(incomp, exist_ok=True)
-    os.makedirs(comp, exist_ok=True)
-
-
 if __name__ == '__main__':
     # logging.getLogger().setLevel(logging.INFO)
     args = args_parse()
@@ -173,40 +159,73 @@ if __name__ == '__main__':
     #   print("No essential components found. Install them by --install-requirements")
     #   exit(0)
     if args.url is None:
-        print("must set url")
+        print("must set url -u/--url")
         exit(-1)
     if not args.url.startswith("https://syzkaller.appspot.com/"):
-        print("url must be https://syzkaller.appspot.com/")
+        print("url must be has the prefix https://syzkaller.appspot.com/")
+        exit(-1)
+
+    if args.dst is None:
+        print("must set dest -d/--dest")
+        exit(-1)
+
+    if not os.path.isabs(args.dst):
+        args.dst = os.path.abspath(args.dst)
+
+    if not os.path.exists(args.dst):
+        print("destination don't existed")
         exit(-1)
 
     print("[*] url: {}".format(args.url))
+
+    # NOTE: checking system environment
     # check_kvm()
+    # ignore = []
 
-    ignore = []
-    # what is this used for?
-    # build_work_dir()
-
-    # print(args.debug)
-    crawler = Crawler(debug=args.debug)
+    # NOTE: checking url
     if args.url != None:
         # https://syzkaller.appspot.com/bug?id=1bef50bdd9622a1969608d1090b2b4a588d0c6ac
         if args.url.__contains__("bug?id="):
             idx = args.url.index("bug?id=") + len("bug?id=")
             hash = args.url[idx:]
-            crawler.run_one_case(hash, 0)
+            url_flag = 0
         # https://syzkaller.appspot.com/bug?extid=dcc068159182a4c31ca3
         elif args.url.__contains__("?extid="):
             # test for https://syzkaller.appspot.com/bug?extid=60db9f652c92d5bacba4
-            # We should use the first 8 char in hash
             idx = args.url.index("?extid=") + len("?extid=")
             hash = args.url[idx:]
-            crawler.run_one_case(hash, 1)
+            url_flag = 1
         else:
             print("url format not support")
             exit(-1)
     else:
         print("must provide a valid url!")
         exit(-1)
+
+    # NOTE: checking and building workdir
+    args.dst = os.path.join(args.dst+ hash[:8])
+    try:
+        os.mkdir(args.dst)
+    except FileExistsError:
+        print("{} existed, please check again".format(args.dst))
+    except PermissionError:
+        print("{} permissing error, please check again".format(args.dst))
+    except FileNotFoundError:
+        print("{} can't make, please check again".format(args.dst))
+    except OSError as error:
+        print("{} make error, please check again".format(args.dst))
+    else:
+        os.system("rm -rf {}".format(args.dst))
+        exit(-1)
+    print("[*] dst: {}".format(args.dst))
+
+    print(type(args.dst))
+    crawler = Crawler(args.dst, args.url, debug=args.debug)
+    print(args.assets)
+    print(args.logs)
+    print("now crawlering....")
+    crawler.run_one_case(hash, url_flag, args.assets, args.logs)
+
 
     # parallel_count = 0
     # manager = multiprocessing.Manager()
