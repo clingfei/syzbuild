@@ -2,7 +2,6 @@ import argparse, os, stat, sys
 from queue import Empty
 import json
 import multiprocessing, threading
-import logging
 import gc
 
 sys.path.append(os.getcwd())
@@ -224,13 +223,19 @@ if __name__ == '__main__':
         # os.system("rm -rf {}".format(args.dst))
         # exit(-1)
 
-    crawler = Crawler(args.dst, args.url, debug=args.debug)
+    crawler = Crawler(args.dst, args.url, url_flag, logs_flag=True)
     # print(args.assets)
     # print(args.logs)
     print("[*] crawlering....")
-    crawler.run_one_case(hash, url_flag, args.assets, args.logs)
-    print("[*] crawler done")
+    crawler.parse(hash)
+    crawler.show()
 
+    which = int(input("chose one: "))
+    if which < len(crawler.cases):
+        crawler.deploy(which)
+    else:
+        print('fuck off. hacker!')
+    print("[*] crawler done")
 
     # parallel_count = 0
     # manager = multiprocessing.Manager()

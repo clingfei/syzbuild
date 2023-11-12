@@ -6,6 +6,7 @@ import re
 from modules.utilities import request_get, extract_vul_obj_offset_and_size, regx_get
 from bs4 import BeautifulSoup
 from bs4 import element
+from prettytable import PrettyTable
 
 syzbot_host_url = "https://syzkaller.appspot.com/"
 num_of_elements = 8
@@ -17,26 +18,52 @@ supports = {
     1: syzbot_bug_ext_url
 }
 
-UPSTREAM_LINUX = "/home/inspur/foorbar/linux"
+UPSTREAM_LINUX = os.environ.get('UPSTREAM_LINUX')
+UPSTREAM_SYZKALLER = os.environ.get('UPSTREAM_SYZKALLER')
 
+GCC8 = os.environ.get("GCC8")
+GCC9 = os.environ.get("GCC9")
+GCC10 = os.environ.get("GCC10")
+GCC11 = os.environ.get("GCC11")
+GCC12 = os.environ.get("GCC12")
+
+CLANG8 = os.environ.get("CLANG8")
+CLANG9 = os.environ.get("CLANG9")
+CLANG10 = os.environ.get("CLANG10")
+CLANG11 = os.environ.get("CLANG11")
+CLANG12 = os.environ.get("CLANG12")
+CLANG13 = os.environ.get("CLANG13")
+CLANG14 = os.environ.get("CLANG14")
+CLANG15 = os.environ.get("CLANG15")
+CLANG16 = os.environ.get("CLANG16")
+CLANG17 = os.environ.get("CLANG17")
 
 class Crawler:
     def __init__(self,
                  dst,
                  url,
-                 debug=False):
+                 url_flag,
+                 assets_flag = False,
+                 logs_flag = False,
+                 debug = False):
 
         self.url = url
         self.dst = dst
-        self.cases = {}
-        self.patches = {}
-        self.commits = None
-        self.syzkaller = None
-        self.logger = None
-        self.workDir = ""
-        self.init_logger(debug)
+        self.url_flag = url_flag
+        self.assets_flag = assets_flag
+        self.logs_flag = logs_flag
 
-    def init_logger(self, debug):
+        # origin website
+        self.soup = None
+
+        self.title = ""
+        self.pretty = None
+        self.cases = {}
+        self.patch = ""
+
+        self.__init_logger(debug)
+
+    def __init_logger(self, debug):
         handler = logging.StreamHandler(sys.stderr)
         format = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
         handler.setFormatter(format)
@@ -49,325 +76,312 @@ class Crawler:
             self.logger.propagate = False
         self.logger.addHandler(handler)
 
-    def run_one_case(self, hash, url_flag, assets_flag, logs_flag):
-        # self.logger.info("retrieve one case: %s", hash)
+    def parse(self, hash):
         try:
-            bug_url = supports[url_flag]
+            bug_url = supports[self.url_flag]
             self.logger.debug("{}{}{}".format(syzbot_host_url, bug_url, hash))
             url = syzbot_host_url + bug_url + hash
+            if url != self.url:
+                print("cheking url failed!\n")
+                exit(-1)
         except IndexError:
             print("url not support")
             return
 
-        if self.retreive_case(url, hash) == -1:
-            return
-
         if hash is not None:
             req = requests.request(method='GET', url=url)
-            soup = BeautifulSoup(req.text, "html.parser")
+            self.soup = BeautifulSoup(req.text, "html.parser")
+            if not self.soup:
+                print('soup is none.')
+                exit(-1)
 
-        self.cases[hash]['title'] = self.get_title_of_case(soup)
-        print("[+] title: ", self.cases[hash]['title'])
-        patch = self.get_patch_of_case(soup)
-        if patch is not None:
-            self.cases[hash]['patch'] = patch
-            print("[+] patch: ", self.cases[hash]['patch'])
-
-        tr = self.get_best_index(soup)
-        commits, syzkaller = self.get_commit_of_case(tr)
-        if commits is None or syzkaller is None:
-            print("Warning!!! commits or syzkaller is None in url: {}".format(url))
+        self.title = self.__parse_title()
+        self.patch = self.__parse_patch()
+        tables = self.__parse_tables()
+        if len(tables) > 1:
+            for _,table in enumerate(tables):
+                # NOTE: only consider crashes table
+                if table.caption is not None:
+                    if table.caption.contents[0].find("Crashes") is not None:
+                        self.__parse_crash_table(table)
         else:
-            self.cases[hash]['url'] = url
-            self.cases[hash]['commits'] = commits
-            self.cases[hash]['syzkaller'] = syzkaller
-            print('[+] kernel={}, syzkaller={}'.format(commits, syzkaller))
+            print("table is none.")
+            exit(-1)
 
-        self.get_config_of_case(tr, url)
-        self.get_console_log_of_case(tr, url)
-        self.get_report_of_case(tr, url)
-        if assets_flag:
-            self.get_asserts_of_case(tr)
-        self.store_to_files(hash)
-
-    def get_title_of_case(self, soup):
-        if soup is None:
-            print("soup is None")
-            return
-        title = soup.body.b.contents[0]
+    def __parse_title(self):
+        title = self.soup.body.b.contents[0]
+        print("[+] title: ", title)
         return title
 
-    def get_patch_of_case(self, soup):
+    def __parse_tables(self):
+        tables = self.soup.find_all('table', {"class": "list_table"})
+        if len(tables) == 0:
+            print("Fail to retrieve bug cases from list_table")
+            return []
+        else:
+            print("[+] table contains {} cases".format(len(tables)))
+        return tables
+
+    def __parse_patch(self):
         patch = None
-        mono = soup.find("span", {"class": "mono"})
+        mono = self.soup.find("span", {"class": "mono"})
         if mono is None:
             return patch
         try:
             patch = mono.contents[1].attrs['href']
         except:
             pass
+        if patch is not None:
+            print("[+] patch: ", patch)
         return patch
 
-    # select the first upstream kernel, console log
-    # we assume every vulnerability record will contain at least entry which can satisfy our demands
-    def get_best_index(self, soup):
-        tables = soup.find_all("table", {"class": "list_table"})
-        for table in tables:
-            if table.caption is not None:
-                if table.caption.contents[0].find("Crashes") != -1 and \
-                        table.caption.contents[0].find("Crashes") is not None:
-                    # FIXME: consider this is no upstream kernel crash
-                    # like https://syzkaller.appspot.com/bug?extid=c53d4d3ddb327e80bc51
-                    for tr in table.tbody.find_all('tr'):
-                        if tr.find("td", {"class": "kernel"}).contents[0] == "upstream" \
-                                and tr.find("td", {"class": "repro"}).contents[0].contents[0] == "console log":
-                            return tr
+    def __parse_crash_table(self, table):
+        cases = self.__parse_table_index(table)
+        for idx, case in enumerate(cases):
+            self.__prepare_case(idx)
+            self.__parse_kernel_from_case(idx, case)
+            self.__parse_commit_from_case(idx, case)
+            self.__parse_config_from_case(idx, case)
+            self.__parse_log_from_case(idx, case)
+            self.__parse_manager_from_case(idx, case)
+            if self.assets_flag:
+                self.__parse_asserts_from_case(idx, case)
 
-    def get_commit_of_case(self, tr):
-        cols = tr.find_all("td", {"class": "tag"})
+    # we assume every vulnerability record will contain at least entry which can satisfy our demands
+    # let user choice which is better ?
+    def __parse_table_index(self, table):
+        # FIXME: consider this is no upstream kernel crash
+        # like https://syzkaller.appspot.com/bug?extid=c53d4d3ddb327e80bc51
+        all_cases = table.tbody.find_all('tr')
+        return all_cases
+
+    def __prepare_case(self, idx):
+        self.logger.info("prepare case")
+        self.cases[idx] = {}
+
+        self.cases[idx]["kernel"] = None
+        self.cases[idx]["commit"] = None
+        self.cases[idx]["syzkaller"] = None
+        self.cases[idx]["config"] = None
+        self.cases[idx]["gcc"] = None
+        self.cases[idx]["log"] = None
+        self.cases[idx]["report"] = None
+        self.cases[idx]["syz"] = None
+        self.cases[idx]["cpp"] = None
+        if self.assets_flag:
+            self.cases[idx]["assets"] = []
+        self.cases[idx]["manager"] = None
+
+        # detail = self.__run_one_case(self, url)
+
+    def __parse_kernel_from_case(self, idx, case):
+        cols = case.find_all("td", {"class": "kernel"})
+        kernel = cols[0].contents[0]
+        if kernel is None:
+            print("[-] Warning: kernel is none in url: {}".format(self.url))
+        else:
+            self.cases[idx]['kernel'] = kernel
+            print("[+] kernel: ", kernel)
+
+    def __parse_commit_from_case(self, idx, case):
+        cols = case.find_all("td", {"class": "tag"})
         commits = cols[0].contents[0].contents[0]
         syzkaller = cols[1].contents[0].contents[0]
-        return commits, syzkaller
-
-    def get_config_of_case(self, tr, url):
-        idx = url.index("bug")
-        if idx == -1:
-            print("Warning: bug not found in url!!!")
+        if commits is None or syzkaller is None:
+            print("[-] Warning: commits or syzkaller is none in url: {}".format(self.url))
         else:
-            prefix = url[:idx]
-            config = tr.find("td", {"class": "config"})
-            new_url = prefix + config.contents[0].attrs['href']
-            if self.dst is not None:
-                req = requests.request(method='GET', url=new_url)
-                with os.open(os.path.join(self.dst, 'config'), os.O_RDWR | os.O_CREAT) as fd:
-                    os.write(fd, req.text.encode())
-                    os.close(fd)
+            self.cases[idx]["commit"] = commits
+            print("[+] commit: ", commits)
+            self.cases[idx]["syzkaller"] = syzkaller
+            print("[+] syzkaller: ", syzkaller)
 
-    def get_console_log_of_case(self, tr, url):
-        idx = url.index("bug")
-        if idx == -1:
-            print("Warning: buf not found in url!!!")
+    def __parse_config_from_case(self, idx, case):
+        ok = self.url.index("bug")
+        if ok == -1:
+            print("[-] Warning: bug not found in {}".format(self.url))
         else:
-            prefix = url[:idx]
-            console = tr.find("td", {"class": "repro"}).contents[0].attrs['href']
-            new_url = prefix + console
-            if self.dst is not None:
-                print("[+] console_log: ", new_url)
-                req = requests.request(method='GET', url=new_url)
-                with os.open(os.path.join(self.dst, 'console_log'), os.O_RDWR | os.O_CREAT) as fd:
-                    os.write(fd, req.text.encode())
-                    os.close(fd)
+            prefix = self.url[:ok]
+            config = case.find("td", {"class": "config"})
+            config = prefix + config.contents[0].attrs['href']
+            self.cases[idx]['config'] = config
+            print("[+] config: ", config)
+            self.__parse_gcc_version_from_config(idx, config)
+            # if self.dst is not None:
+            #     req = requests.request(method='GET', url=new_url)
+            #     with os.open(os.path.join(self.dst, 'config'), os.O_RDWR | os.O_CREAT) as fd:
+            #         os.write(fd, req.text.encode())
+            #         os.close(fd)
 
-    def get_report_of_case(self, tr, url):
-        idx = url.index("bug")
-        if idx == -1:
-            print("Warning: buf not found in url!!!")
+    def __parse_log_from_case(self, idx, case):
+        ok = self.url.index("bug")
+        if ok == -1:
+           print("[-] Warning: bug not found in {}".format(self.url))
         else:
-            prefix = url[:idx]
-            reports = tr.find_all("td", {"class": "repro"})
-            for report in reports:
-                if report.contents[0].contents[0] == "report":
-                    new_url = prefix + report.contents[0].attrs['href']
-                    print("[+] report url: ", new_url)
-                    req = requests.request(method='GET', url=new_url)
-                    with os.open(os.path.join(self.dst, 'report'), os.O_RDWR | os.O_CREAT) as fd:
-                        os.write(fd, req.text.encode())
-                        os.close(fd)
-                    return
+            prefix = self.url[:ok]
+            all = case.find_all("td", {"class": "repro"})
+            log,report,syz,cpp,_ = case.find_all("td", {"class": "repro"})
 
-    def get_asserts_of_case(self, tr):
-        assets = tr.find("td", {"class": "assets"})
+            if log.contents:
+                log = prefix + log.contents[0].attrs['href']
+                self.cases[idx]['log'] = log
+                print("[+] console_log: ", log)
+
+            if report.contents:
+                report = prefix + report.contents[0].attrs['href']
+                self.cases[idx]['report'] = report
+                print("[+] report: ", report)
+
+            if syz.contents:
+                syz = prefix +  syz.contents[0].attrs['href']
+                self.cases[idx]['syz'] = syz
+                print("[+] syz_repro: ", syz)
+
+            if cpp.contents:
+                cpp = prefix + cpp.contents[0].attrs['href']
+                self.cases[idx]['cpp'] = cpp
+                print("[+] cpp_repro: ", cpp)
+
+    def __parse_asserts_from_case(self, idx, case):
+        assets = case.find("td", {"class": "assets"})
         if assets is None:
             return
         spans = assets.find_all("span", {"class": "no-break"})
+        print("[+] assets: ")
         for span in spans:
-            os.chdir(self.dst)
-            os.system("wget " + span.contents[1].attrs['href'])
-            print(span.contents[1].attrs['href'])
+            cnt = span.contents[1].attrs['href']
+            print("  {}".format(cnt))
 
-    def get_gcc_version_from_config(self):
-        pass
+    def __parse_manager_from_case(self, idx, case):
+        cols = case.find_all("td", {"class": "manager"})
+        manager = cols[0].contents[0]
+        if manager is None:
+            print("[-] Warning: manager is none in url: {}".format(self.url))
+        else:
+            self.cases[idx]['manager'] = manager
+            print("[+] manager: ", manager)
 
+    def __parse_gcc_version_from_config(self, idx, config):
+        req = requests.request(method='GET', url=config).text.encode()
+        start = req.find(b"CONFIG_CC_VERSION_TEXT=") + len("CONFIG_CC_VERSION_TEXT=")
+        if start != -1:
+            end = req.find(b"\n", start)
+        if end != -1:
+            gcc = req[start+1:end-1]
+            self.cases[idx]['gcc'] = gcc.decode("utf-8")
+        else:
+            print("[-] Warning: can not found gcc version in config")
 
-    def store_to_files(self, hash):
-        os.chdir(self.dst)
-        os.system("echo " + self.cases[hash]['url'] + " > url")
-        # os.system("echo " + self.cases[hash]['syzkaller'] + " > syzkaller")
-        # os.system("echo " + self.cases[hash]['commit'] + " > kernel")
-        os.system("echo " + self.cases[hash]['title'] + " > description")
-        # FIXME: hard-coded linux
-        # status = os.system("cp -r /home/spark/foobar/linux {}".format(os.path.join(self.dst, "kernel")))
-        # if not status:
-        #     print("copy linux folder to kernel failed!\n")
-        #     exit(-1)
-        kernel = os.path.join(os.path.dirname(self.dst), "linux")
-        if not os.path.exists(kernel):
-            print('linux folder do not existed!')
-            exit(-1)
+    def show(self):
+        table = PrettyTable()
+        table.field_names = ["idx", "kernel", "commit", "syzkaller", "gcc", "syz", "cpp", "manager"]
+        # for idx, case in self.cases:
+        for idx, case in self.cases.items():
+            table.add_row([str(idx),
+                           str(case["kernel"]),
+                           str(case["commit"]),
+                           str(case["syzkaller"]),
+                           str(case["gcc"]),
+                           "True" if case["syz"] else "None",
+                           "True" if case["cpp"] else "None",
+                           str(case["manager"])
+                           ])
+        table.title = self.title
+        # print(self.title)
+        print(table)
 
-        syzkaller = os.path.join(os.path.dirname(self.dst), "syzkaller")
+    # chose one
+    def deploy(self, idx):
+        with open(os.path.join(self.dst, "description"), "w") as fp:
+            fp.write(self.title)
+
+        with open(os.path.join(self.dst, "url"), "w") as fp:
+            fp.write(self.url)
+
+        self._deploy_kernel(idx)
+        import ipdb; ipdb.set_trace()
+        self._deploy_syzkaller(idx)
+        self._deploy_gcc(idx)
+        self._deploy_report(idx)
+        if self.logs_flag:
+            self._deploy_all_logs()
+        else:
+            self._deploy_log(idx)
+
+    def deploy_allcases(self):
+        print("not implemented now")
+
+    def _deploy_kernel(self, idx, default=UPSTREAM_LINUX):
+        if self.cases[idx]['kernel'] == "upstream":
+            kernel = default
+            if not os.path.exists(kernel):
+                print('defalut kernel folder do not existed!')
+                exit(-1)
+
+            try:
+                res = subprocess.run(["cp", "-r", "{}".format(kernel),"{}".format(os.path.join(self.dst, "kernel"))], check=True, text=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                print("subprocess failed ", e)
+                exit(-1)
+
+            if self.dst is not None:
+                req = requests.request(method='GET', url=self.cases[idx]['config'])
+                kernel = os.path.join(self.dst, "kernel")
+                with open(os.path.join(kernel, '.config'), 'wb') as fd:
+                    fd.write(req.text.encode())
+
+            os.chdir(os.path.join(self.dst, "kernel"))
+            os.system("git checkout -q " + self.cases[idx]['commit'])
+        elif self.cases[idx]['kernel'] == "net-next":
+            print("not implemented now")
+        else:
+            print("not implemented now")
+
+    def _deploy_syzkaller(self, idx, default=UPSTREAM_SYZKALLER):
+        syzkaller = default
         if not os.path.exists(syzkaller):
-            print('linux folder do not existed!')
+            print('defalut syzkaller folder do not existed!')
             exit(-1)
-
-        try:
-            res = subprocess.run(["cp", "-r", "{}".format(kernel),"{}".format(os.path.join(self.dst, "kernel"))], check=True, text=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            print("subprocess failed ", e)
-            exit(-1)
-
-        print("git reset " + self.cases[hash]['commits'])
-        os.chdir(os.path.join(self.dst, "kernel"))
-        os.system("git checkout -q " + self.cases[hash]['commits'])
-        os.chdir("..")
-        os.system("cp config kernel/.config")
-
-        # FIXME: hard-coded syzkaller
         try:
             res = subprocess.run(["cp", "-r", "{}".format(syzkaller),"{}".format(os.path.join(self.dst, "syzkaller"))], check=True, text=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             print("subprocess failed ", e)
             exit(-1)
+
         os.chdir(os.path.join(self.dst, "syzkaller"))
-        os.system("git checkout -q " + self.cases[hash]['syzkaller'])
-        os.chdir("..")
+        os.system("git checkout -q " + self.cases[idx]['syzkaller'])
 
-    # def get_title_of_case(self, url, hash=None, text=None):
-    #     if hash == None and text == None:
-    #         self.logger.info("No case given")
-    #         return None
-    #     if hash != None:
-    #         req = requests.request(method='GET', url=url)
-    #         soup = BeautifulSoup(req.text, "html.parser")
-    #     else:
-    #         soup = BeautifulSoup(text, "html.parser")
-    #     title = soup.body.b.contents[0]
-    #     return title
-
-    # def get_patch_of_case(self, url, hash):
-    #     patch = None
-    #     req = requests.request(method='GET', url=url)
-    #     soup = BeautifulSoup(req.text, "html.parser")
-    #     mono = soup.find("span", {"class": "mono"})
-    #     if mono == None:
-    #         return patch
-    #     try:
-    #         patch = mono.contents[1].attrs['href']
-    #     except:
-    #         pass
-    #     return patch
-
-    def retreive_case(self, url, hash):
-        self.cases[hash] = {}
-        detail = self.request_detail(url)
-        self.logger.info("get table")
-        self.logger.debug(detail)
-        # TODO: 不需要这样数量的限定，但是也要找到一个方法来限制一下
-        # if len(detail) < num_of_elements:
-        #   self.logger.error("Failed to get detail of a case {}".format(url))
-        #   self.cases.pop(hash)
-        #   return -1
-        self.cases[hash]["kernel"] = detail[0]
-        self.cases[hash]["commit"] = detail[1]
-        self.cases[hash]["syzkaller"] = detail[2]
-        self.cases[hash]["config"] = detail[3]
-        self.cases[hash]["syz_repro"] = detail[4]
-        self.cases[hash]["log"] = detail[5]
-        self.cases[hash]["c_repro"] = detail[6]
-        self.cases[hash]["time"] = detail[7]
-        self.cases[hash]["manager"] = detail[8]
-        self.cases[hash]["report"] = detail[9]
-        self.cases[hash]["vul_offset"] = detail[10]
-        self.cases[hash]["obj_size"] = detail[11]
-
-    def request_detail(self, url, index=1):
+    def _deploy_gcc(self, idx):
         """
-    index 默认的值是1 也就是获取第一个的配置来build
-    """
-        print(url)
-        tables = self.__get_table(url)
-        if tables == []:
-            print("error occur in request_detail: {}".format(hash))
-            return []
-        count = 0
-        for table in tables:
-            if table.text.find('Crash') != -1:
-                for case in table.tbody.contents:
-                    if type(case) == element.Tag:
-                        kernel = case.find('td', {"class": "kernel"})
-                        if kernel.text == "upstream":
-                            self.logger.debug("Find kernel: '{}'".format(kernel.text))
-                        elif kernel.text == "linux-next":
-                            self.logger.debug("Find kernel: '{}'".format(kernel.text))
-                            pass
-                        else:
-                            self.logger.debug("Find kernel: '{}'".format(kernel.text))
-                            # TODO: 基本只要不是linux-next 就可以成功
-                            # linux-next 的commit 不能够顺利切换
-                            # continue
-                            pass
-                        count += 1
-                        if count < index:
-                            continue
-                        try:
-                            manager = case.find('td', {"class": "manager"})
-                            manager_str = manager.text
-                            time = case.find('td', {"class": "time"})
-                            time_str = time.text
-                            tags = case.find_all('td', {"class": "tag"})
-                            try:
-                                kernel_url = tags[0].next.attrs['href']
-                                kernel = kernel_url[:kernel_url.index(".git") + len(".git")]
-                            except:
-                                self.logger.info("kernel url is missing.{0}".format(kernel_url))
-                                break
-                            m = re.search(r'id=([0-9a-z]*)', kernel_url)
-                            commit = m.groups()[0]
-                            self.logger.debug("Kernel commit: {}".format(commit))
-                            m = re.search(r'commits\/([0-9a-z]*)', tags[1].next.attrs['href'])
-                            syzkaller = m.groups()[0]
-                            self.logger.debug("Syzkaller commit: {}".format(syzkaller))
-                            config = syzbot_host_url + case.find('td', {"class": "config"}).next.attrs['href']
-                            self.logger.debug("Config URL: {}".format(config))
-                            repros = case.find_all('td', {"class": "repro"})
-                            log = syzbot_host_url + repros[0].next.attrs['href']
-                            self.logger.debug("Log URL: {}".format(log))
-                            report = syzbot_host_url + repros[1].next.attrs['href']
-                            self.logger.debug("Log URL: {}".format(report))
-                            r = request_get(report)
-                            report_list = r.text.split('\n')
-                            offset, size, _ = extract_vul_obj_offset_and_size(report_list)
-                            try:
-                                syz_repro = syzbot_host_url + repros[2].next.attrs['href']
-                                self.logger.debug("Testcase URL: {}".format(syz_repro))
-                            except:
-                                self.logger.info(
-                                    "Repro is missing. Failed to retrieve case {}{}{}".format(syzbot_host_url,
-                                                                                              syzbot_bug_base_url,
-                                                                                              hash))
-                                syz_repro = None
-                            try:
-                                c_repro = syzbot_host_url + repros[3].next.attrs['href']
-                                self.logger.debug("C prog URL: {}".format(c_repro))
-                            except:
-                                c_repro = None
-                                self.logger.info("No c prog found")
-                        except:
-                            self.logger.info(
-                                "Failed to retrieve case {}{}{}".format(syzbot_host_url, syzbot_bug_base_url, hash))
-                            continue
-                        return [kernel, commit, syzkaller, config, syz_repro, log, c_repro, time_str, manager_str,
-                                report, offset, size]
-                break
-        self.logger.info("[Failed] {} fail to find a proper crash".format(url))
-        return []
+        gcc (Debian 12.2.0-14) 12.2.0
+        gcc (Debian 10.2.1-6) 10.2.1 20210110
+        Debian clang version 11.0.1-2
+        """
+        gcc = self.cases[idx]['gcc']
+        if gcc == "gcc (Debian 12.2.0-14) 12.2.0":
+            print("gcc12")
+        else:
+            print("not implemented now")
 
-    def __get_table(self, url):
-        self.logger.info("Get table from {}".format(url))
-        req = requests.request(method='GET', url=url)
-        soup = BeautifulSoup(req.text, "html.parser")
-        tables = soup.find_all('table', {"class": "list_table"})
-        if len(tables) == 0:
-            print("Fail to retrieve bug cases from list_table")
-            return []
-        return tables
+    def deploy_clang(self, idx):
+        """
+        fuck
+        """
+        pass
+
+    def _deploy_report(self, idx):
+        req = requests.request(method='GET', url=self.cases[idx]['report'])
+        with open(os.path.join(self.dst, 'report'), "wb")as fd:
+            fd.write(req.text.encode())
+
+        syzkaller = os.path.join(os.path.dirname(self.dst), "syzkaller")
+
+    def _deploy_log(self, idx):
+        req = requests.request(method='GET', url=self.cases[idx]['log'])
+        with open(os.path.join(self.dst, 'log'), "wb") as fd:
+            fd.write(req.text.encode())
+
+    def _deploy_all_logs(self):
+        for idx, case in self.cases.items():
+            req = requests.request(method='GET', url=case['log'])
+            with open(os.path.join(self.dst, 'log{}'.format(idx)), "wb") as fd:
+                fd.write(req.text.encode())
