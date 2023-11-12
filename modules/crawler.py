@@ -1,5 +1,6 @@
 import requests
 import logging
+import subprocess
 import os, sys
 import re
 from modules.utilities import request_get, extract_vul_obj_offset_and_size, regx_get
@@ -66,11 +67,11 @@ class Crawler:
             soup = BeautifulSoup(req.text, "html.parser")
 
         self.cases[hash]['title'] = self.get_title_of_case(soup)
-        print("title: ", self.cases[hash]['title'])
+        print("[+] title: ", self.cases[hash]['title'])
         patch = self.get_patch_of_case(soup)
         if patch is not None:
             self.cases[hash]['patch'] = patch
-            print("patch: ", self.cases[hash]['patch'])
+            print("[+] patch: ", self.cases[hash]['patch'])
 
         tr = self.get_best_index(soup)
         commits, syzkaller = self.get_commit_of_case(tr)
@@ -80,7 +81,7 @@ class Crawler:
             self.cases[hash]['url'] = url
             self.cases[hash]['commits'] = commits
             self.cases[hash]['syzkaller'] = syzkaller
-            print('commits={}, syzkaller={}'.format(commits, syzkaller))
+            print('[+] kernel={}, syzkaller={}'.format(commits, syzkaller))
 
         self.get_config_of_case(tr, url)
         self.get_console_log_of_case(tr, url)
@@ -152,7 +153,7 @@ class Crawler:
             console = tr.find("td", {"class": "repro"}).contents[0].attrs['href']
             new_url = prefix + console
             if self.dst is not None:
-                print("console_log: ", new_url)
+                print("[+] console_log: ", new_url)
                 req = requests.request(method='GET', url=new_url)
                 fd = os.open(os.path.join(self.dst, 'console_log'), os.O_RDWR | os.O_CREAT)
                 os.write(fd, req.text.encode())
@@ -168,7 +169,7 @@ class Crawler:
             for report in reports:
                 if report.contents[0].contents[0] == "report":
                     new_url = prefix + report.contents[0].attrs['href']
-                    print("report url: ", new_url)
+                    print("[+] report url: ", new_url)
                     req = requests.request(method='GET', url=new_url)
                     fd = os.open(os.path.join(self.dst, 'report'), os.O_RDWR | os.O_CREAT)
                     os.write(fd, req.text.encode())
@@ -188,18 +189,45 @@ class Crawler:
     def store_to_files(self, hash):
         os.chdir(self.dst)
         os.system("echo " + self.cases[hash]['url'] + " > url")
-        os.system("echo " + self.cases[hash]['syzkaller'] + " > syzkaller")
+        # os.system("echo " + self.cases[hash]['syzkaller'] + " > syzkaller")
+        # os.system("echo " + self.cases[hash]['commit'] + " > kernel")
         os.system("echo " + self.cases[hash]['title'] + " > description")
-        print(self.dst + "/kernel")
         # FIXME: hard-coded linux
-        os.system("cp -r /home/inspur/foobar/linux " + self.dst + "/kernel")
-        os.system("cd " + self.dst + "/kernel")
-        print(os.getcwd())
+        # status = os.system("cp -r /home/spark/foobar/linux {}".format(os.path.join(self.dst, "kernel")))
+        # if not status:
+        #     print("copy linux folder to kernel failed!\n")
+        #     exit(-1)
+        kernel = os.path.join(os.path.dirname(self.dst), "linux")
+        if not os.path.exists(kernel):
+            print('linux folder do not existed!')
+            exit(-1)
+
+        syzkaller = os.path.join(os.path.dirname(self.dst), "syzkaller")
+        if not os.path.exists(syzkaller):
+            print('linux folder do not existed!')
+            exit(-1)
+
+        try:
+            res = subprocess.run(["cp", "-r", "{}".format(kernel),"{}".format(os.path.join(self.dst, "kernel"))], check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            print("subprocess failed ", e)
+            exit(-1)
+
         print("git reset " + self.cases[hash]['commits'])
+        os.chdir(os.path.join(self.dst, "kernel"))
+        os.system("git checkout -q " + self.cases[hash]['commits'])
+        os.chdir("..")
+        os.system("cp config kernel/.config")
+
         # FIXME: hard-coded syzkaller
-        os.chdir(self.dst + "/" + "kernel")
-        os.system("git reset --hard " + self.cases[hash]['commits'])
-        os.system("mv ../.config .")
+        try:
+            res = subprocess.run(["cp", "-r", "{}".format(syzkaller),"{}".format(os.path.join(self.dst, "syzkaller"))], check=True, text=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            print("subprocess failed ", e)
+            exit(-1)
+        os.chdir(os.path.join(self.dst, "syzkaller"))
+        os.system("git checkout -q " + self.cases[hash]['syzkaller'])
+        os.chdir("..")
 
     # def get_title_of_case(self, url, hash=None, text=None):
     #     if hash == None and text == None:

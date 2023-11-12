@@ -204,27 +204,33 @@ if __name__ == '__main__':
 
     # NOTE: checking and building workdir
     args.dst = os.path.join(args.dst+ hash[:8])
+    import ipdb; ipdb.set_trace()
     try:
         os.mkdir(args.dst)
     except FileExistsError:
         print("{} existed, please check again".format(args.dst))
+        exit(-1)
     except PermissionError:
         print("{} permissing error, please check again".format(args.dst))
-    except FileNotFoundError:
-        print("{} can't make, please check again".format(args.dst))
-    except OSError as error:
-        print("{} make error, please check again".format(args.dst))
-    else:
-        os.system("rm -rf {}".format(args.dst))
         exit(-1)
-    print("[*] dst: {}".format(args.dst))
+    except FileNotFoundError:
+        print("{} not found, please check again".format(args.dst))
+        exit(-1)
+    except OSError as error:
+        print("{} cause os error, please check again".format(args.dst))
+        exit(-1)
+    else:
+        print("[*] dst: {}".format(args.dst))
+        # print("whatever failed in mkdir {}",args.dst)
+        # os.system("rm -rf {}".format(args.dst))
+        # exit(-1)
 
-    print(type(args.dst))
     crawler = Crawler(args.dst, args.url, debug=args.debug)
-    print(args.assets)
-    print(args.logs)
-    print("now crawlering....")
+    # print(args.assets)
+    # print(args.logs)
+    print("[*] crawlering....")
     crawler.run_one_case(hash, url_flag, args.assets, args.logs)
+    print("[*] crawler done")
 
 
     # parallel_count = 0
