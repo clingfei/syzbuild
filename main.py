@@ -250,3 +250,62 @@ if __name__ == '__main__':
     # #   x = threading.Thread(target=prepare_cases, args=(i, args,), name="lord-{}".format(i))
     # #   x.start()
     # prepare_case(args)
+
+    # temporary use to create img
+    # bullseye disk
+    """
+    bullseye = os.path.join(dir(args.dst))
+    os.system("cp -r {} .".format(),)
+    """
+
+    # syzbot config
+
+    """
+    {
+	"target": "linux/amd64",
+	"http": "0.0.0.0:56741",
+	"workdir": "/home/inspur/syzbot/23bbb17a/workdir",
+	"kernel_obj": "/home/inspur/syzbot/23bbb17a/kernel",
+	"image": "/home/inspur/bullseye/bullseye.img",
+	"sshkey": "/home/inspur/bullseye/bullseye.id_rsa",
+	"syzkaller": "/home/inspur/syzbot/23bbb17a/syzkaller",
+	"procs": 8,
+	"type": "qemu",
+	"max_crash_logs": 20,
+	"cover": true,
+	"raw_cover" : true,
+	"reproduce": false,
+	"preserve_corpus": false,
+	"vm": {
+		"count": 8,
+		"kernel": "/home/inspur/syzbot/0ca89728/kernel/arch/x86/boot/bzImage",
+		"cpu": 4,
+		"mem":
+        }
+    }
+    """
+
+    # run.sh
+
+    """
+    qemu-system-x86_64 \
+        -kernel ./kernel/arch/x86/boot/bzImage \
+        -append "console=ttyS0 root=/dev/sda debug earlyprintk=serial slub_debug=QUZ" \
+        -hda ./bullseye/bullseye.img \
+        -net user,hostfwd=tcp:0.0.0.0:31338-:22 -net nic \
+        -enable-kvm \
+        -cpu host \
+        -nographic \
+        -m 8G \
+        -smp 4 \
+        -pidfile vm.pid \
+        2>&1 | tee vm.log
+    """
+
+    # git checkout syzkaller
+    """
+    not implemented now
+    """
+
+
+

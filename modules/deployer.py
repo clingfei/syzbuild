@@ -17,6 +17,31 @@ stamp_build_syzkaller = "BUILD_SYZKALLER"
 stamp_build_kernel = "BUILD_KERNEL"
 stamp_reproduce_ori_poc = "REPRO_ORI_POC"
 
+"""
+{
+	"target": "linux/amd64",
+	"http": "0.0.0.0:56741",
+	"workdir": "/home/inspur/syzbot/23bbb17a/workdir",
+	"kernel_obj": "/home/inspur/syzbot/23bbb17a/kernel",
+	"image": "/home/inspur/bullseye/bullseye.img",
+	"sshkey": "/home/inspur/bullseye/bullseye.id_rsa",
+	"syzkaller": "/home/inspur/syzbot/23bbb17a/syzkaller",
+	"procs": 8,
+	"type": "qemu",
+	"max_crash_logs": 20,
+	"cover": true,
+	"raw_cover" : true,
+	"reproduce": false,
+	"preserve_corpus": false,
+	"vm": {
+		"count": 8,
+		"kernel": "/home/inspur/syzbot/0ca89728/kernel/arch/x86/boot/bzImage",
+		"cpu": 4,
+		"mem":
+  }
+}
+"""
+
 syz_config_template="""
 {{
   "target": "linux/amd64/{8}",
@@ -46,6 +71,7 @@ syz_config_template="""
 class Deployer():
   def __init__(self, index=0, debug=False, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700):
     """
+    deployer environment
     index: table中的第几个,默认是第0个,因为其他的还没有实现
     debug: 是否开启log
     force: 是否重新clone/build
