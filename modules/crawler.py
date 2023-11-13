@@ -38,7 +38,7 @@ CLANG15 = os.environ.get("CLANG15")
 CLANG16 = os.environ.get("CLANG16")
 CLANG17 = os.environ.get("CLANG17")
 
-class Crawler:
+class Crawler():
     def __init__(self,
                  dst,
                  url,
@@ -298,7 +298,6 @@ class Crawler:
             fp.write(self.url)
 
         self._deploy_kernel(idx)
-        import ipdb; ipdb.set_trace()
         self._deploy_syzkaller(idx)
         self._deploy_gcc(idx)
         self._deploy_report(idx)

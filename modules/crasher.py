@@ -32,7 +32,7 @@ CONFIRM = 1
 SUSPICIOUS = 2
 thread_fn = None
 
-class Crasher:
+class Crasher():
     def __init__(self, project_path, case_path, ssh_port, logger, debug, offset, qemu_num, store_read=True, compiler="gcc-7", max_compiling_kernel=1):
         os.makedirs("{}/poc".format(case_path), exist_ok=True)
         self.logger = logger

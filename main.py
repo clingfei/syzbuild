@@ -224,8 +224,6 @@ if __name__ == '__main__':
         # exit(-1)
 
     crawler = Crawler(args.dst, args.url, url_flag, logs_flag=True)
-    # print(args.assets)
-    # print(args.logs)
     print("[*] crawlering....")
     crawler.parse(hash)
     crawler.show()
