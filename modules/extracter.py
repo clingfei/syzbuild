@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 
 class Extracter():
@@ -24,6 +25,10 @@ class Extracter():
     # all the progs
     self.progs = []
 
+    import ipdb; ipdb.set_trace();
+    if os.path.isabs(self.folder):
+        self.folder = os.path.abspath(self.folder)
+
     if not os.path.exists(self.folder):
       print("folder must exists")
       exit(-1)
@@ -34,7 +39,7 @@ class Extracter():
         with open(log, "r") as fp:
           self.signle = True
           self.file = log
-          print("single mode: log")
+          print("[*] single mode: {}".format(log))
       except IOError:
         print("try console failed. try next...")
 
@@ -44,7 +49,7 @@ class Extracter():
         with open(log, "r") as fp:
           self.signle = True
           self.file = log
-          print("single mode: log")
+          print("[*] single mode: ".format(log))
       except IOError:
         print("try console_log failed. try next...")
 
@@ -54,13 +59,14 @@ class Extracter():
         with open(log, "r") as fp:
           self.signle = True
           self.file = log
-          print("single mode: log")
+          print("[*] single mode: ".format(log))
       except IOError:
         print("try log failed. try next...")
 
     if self.signle:
       self.extract()
     else:
+      print("[*] batch mode")
       self.batch = True
       self.files = glob.glob(self.folder+"/log*")
       self.extract()
@@ -137,11 +143,19 @@ class Extracter():
     if not folder:
       folder = self.folder
     dst = os.path.join(folder, "progs")
-    if os.path.exists(dst):
+    try:
+      os.mkdir(dst)
+    except FileExistsError:
       # FIXME: don't be so aggressive
       # shutil.rmtree(dst)
-      print("progs existed, please check and try again")
-    os.mkdir(dst)
+      print("{} existed, please check and try again".format(dst))
+      exit(-1)
+    except PermissionError:
+      print("{} permission error, please check and try again".format(dst))
+    except FileNotFounError:
+      print("{} not found, please check and try again".format(dst))
+    except OSError as err:
+      print("{} err {}, please check and try again".format(dst, err))
 
     for i,prog in enumerate(self.progs):
       open(os.path.join(dst, "{0}.prog".format(i)), "wb").write(prog.encode())
@@ -158,7 +172,14 @@ class Extracter():
 
 
 if __name__ == "__main__":
-  ex = Extracter("/home/spark/foobar/3ba8f209")
+  if len(sys.argv) == 3:
+     src = sys.argv[1]
+     dst = sys.argv[2]
+  else:
+     print("plase set src folder and dst folder")
+
+  ex = Extracter(src)
   ex.extract()
-  ex.split_save("/tmp/")
+  ex.split_save(dst)
+  print("[*] done")
 
