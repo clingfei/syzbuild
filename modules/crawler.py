@@ -310,6 +310,9 @@ class Crawler():
         print("not implemented now")
 
     def _deploy_kernel(self, idx, default=UPSTREAM_LINUX):
+        if not default:
+            print("please set UPSTREAM_LINUX.")
+            exit(-1)
         if self.cases[idx]['kernel'] == "upstream":
             kernel = default
             if not os.path.exists(kernel):
@@ -336,6 +339,9 @@ class Crawler():
             print("not implemented now")
 
     def _deploy_syzkaller(self, idx, default=UPSTREAM_SYZKALLER):
+        if not default:
+            print("please set UPSTREAM_SYZKALLER.")
+            exit(-1)
         syzkaller = default
         if not os.path.exists(syzkaller):
             print('defalut syzkaller folder do not existed!')
