@@ -11,8 +11,17 @@
 
 使用方法：
 
+安装依赖  
+
 ```shell
-proxychains python3 main.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd -d /home/spark/foobar/
+ipdb
+IPython
+prettytable
+portpicker
+```
+
+```shell
+python3 main.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd -d /home/spark/foobar/
 ```
 最好挂上代理，不然clone不下来
 成功将会在``下生成所有上述所需
