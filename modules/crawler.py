@@ -274,7 +274,6 @@ class Crawler():
             end = req.find(b"\n", start)
         if end != -1:
             compiler = req[start+1:end-1].decode('utf-8')
-            import ipdb; ipdb.set_trace();
             if "gcc" in compiler:
                 version = compiler.strip().split(' ')[-1]
                 self.cases[idx]['version'] = int(version.split('.')[0])
@@ -294,7 +293,6 @@ class Crawler():
         table.field_names = ["idx", "kernel", "syzkaller", "compiler", "syz", "cpp", "manager"]
         # for idx, case in self.cases:
         for idx, case in self.cases.items():
-            import ipdb;ipdb.set_trace();
             table.add_row([str(idx),
                            str(case["kernel"]),
                            str(case["syzkaller"]),
@@ -305,5 +303,3 @@ class Crawler():
                            ])
         table.title = self.title
         print(table)
-
-

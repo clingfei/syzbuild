@@ -896,7 +896,7 @@ class Deployer():
           break
       return res
 
-    # chose one
+  # chose one
   def deploy(self, idx):
       with open(os.path.join(self.dst, "description"), "w") as fp:
           fp.write(self.title)
