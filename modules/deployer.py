@@ -6,41 +6,18 @@ import requests
 import datetime
 import shutil
 import logging
+import subprocess
 
 import modules.utilities as utilities
 from modules.utilities import chmodX
-from modules.crawler import syzbot_host_url, syzbot_bug_base_url
 from subprocess import call, Popen, PIPE, STDOUT
 from dateutil import parser as time_parser
+
+from modules.crawler import syzbot_host_url, syzbot_bug_base_url
 
 stamp_build_syzkaller = "BUILD_SYZKALLER"
 stamp_build_kernel = "BUILD_KERNEL"
 stamp_reproduce_ori_poc = "REPRO_ORI_POC"
-
-"""
-{
-	"target": "linux/amd64",
-	"http": "0.0.0.0:56741",
-	"workdir": "/home/inspur/syzbot/23bbb17a/workdir",
-	"kernel_obj": "/home/inspur/syzbot/23bbb17a/kernel",
-	"image": "/home/inspur/bullseye/bullseye.img",
-	"sshkey": "/home/inspur/bullseye/bullseye.id_rsa",
-	"syzkaller": "/home/inspur/syzbot/23bbb17a/syzkaller",
-	"procs": 8,
-	"type": "qemu",
-	"max_crash_logs": 20,
-	"cover": true,
-	"raw_cover" : true,
-	"reproduce": false,
-	"preserve_corpus": false,
-	"vm": {
-		"count": 8,
-		"kernel": "/home/inspur/syzbot/0ca89728/kernel/arch/x86/boot/bzImage",
-		"cpu": 4,
-		"mem":
-  }
-}
-"""
 
 syz_config_template="""
 {{
@@ -69,7 +46,7 @@ syz_config_template="""
 }}"""
 
 class Deployer():
-  def __init__(self, index=0, debug=False, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700):
+  def __init__(self, info, index=0, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700, debug=False, ):
     """
     deployer environment
     index: table中的第几个,默认是第0个,因为其他的还没有实现
@@ -77,6 +54,14 @@ class Deployer():
     force: 是否重新clone/build
     max: 编译时候使用的核心最多
     """
+    self.cases= info
+
+    """
+    config file in one machine
+    syzbuild_debug
+    """
+    self.config = None
+
     self.index = index
     self.debug = debug
     self.force= force
@@ -90,8 +75,9 @@ class Deployer():
     #   self.max = 8
     self.max = -1
 
-    # 这里默认dump是True，就是要把相关环境文件统一保存在dump文件夹下面
-    self.dump = True
+    self.init_logger()
+    self.deploy()
+
 
   def init_logger(self, hash_val=None):
     self.logger = logging.getLogger(__name__)
@@ -135,7 +121,7 @@ class Deployer():
   #       compiler=self.compiler,
   #       max_compiling_kernel=self.max_compiling_kernel)
 
-  def deploy(self, hash_val, case):
+  def deployhello(self, hash_val, case):
     self.setup_hash(hash_val)
     self.project_path = os.getcwd()
     self.package_path = os.path.join(self.project_path)
@@ -247,66 +233,6 @@ class Deployer():
     # else:
     self.__move_to_completed()
 
-  def run_syzkaller(self, hash_val, limitedMutation):
-    self.logger.info("run syzkaller".format(self.index))
-    syzkaller = os.path.join(self.syzkaller_path, "bin/syz-manager")
-    exitcode = 4
-    # First round, we only enable limited syscalls.
-    # If failed to trigger a write crash, we enable more syscalls to run it again
-    for _ in range(0, 3):
-      if self.logger.level == logging.DEBUG:
-        p = Popen([syzkaller,
-                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]),
-                   "-debug",
-                   "-poc"
-                  ],
-              stdout=PIPE,
-              stderr=STDOUT
-              )
-        with p.stdout:
-          self.__log_subprocess_output(p.stdout, logging.INFO)
-        exitcode = p.wait()
-
-        if not limitedMutation:
-          p = Popen([syzkaller,
-                     "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7]),
-                     "-debug"
-                    ],
-              stdout=PIPE,
-              stderr=STDOUT
-              )
-          with p.stdout:
-            self.__log_subprocess_output(p.stdout, logging.INFO)
-        exitcode = p.wait()
-      else:
-        p = Popen([syzkaller,
-                   "--config={}/workdir/{}-poc.cfg".format(self.syzkaller_path, hash_val[:7]),
-                   "-poc"
-                  ],
-            stdout = PIPE,
-            stderr = STDOUT
-            )
-        with p.stdout:
-          self.__log_subprocess_output(p.stdout, logging.INFO)
-        exitcode = p.wait()
-
-        if not limitedMutation:
-          p = Popen([syzkaller,
-                     "--config={}/workdir/{}.cfg".format(self.syzkaller_path, hash_val[:7])],
-              stdout = PIPE,
-              stderr = STDOUT
-              )
-          with p.stdout:
-            self.__log_subprocess_output(p.stdout, logging.INFO)
-        exitcode = p.wait()
-      if exitcode != 4:
-          break
-    self.logger.info("syzkaller is done with exitcode {}".format(exitcode))
-    if exitcode == 3:
-      #Failed to parse the testcase
-      if self.correctTemplate() and self.compileTemplate():
-        exitcode = self.run_syzkaller(hash_val, limitedMutation)
-    return exitcode
 
   def compileTemplate(self):
     target = os.path.join(self.package_path, "scripts/syz-compile.sh")
@@ -600,7 +526,7 @@ class Deployer():
     self.logger.info("script/deploy.sh is done with exitcode {}".format(exitcode))
     return exitcode
 
-  def __write_config(self, testcase, hash_val):
+  def __deploy_syzkaller_config(self, testcase, hash_val):
     dependent_syscalls = []
     syscalls = self.__extract_syscalls(testcase)
     if syscalls == []:
@@ -969,3 +895,104 @@ class Deployer():
           res = ''.join(text[i:])
           break
       return res
+
+    # chose one
+  def deploy(self, idx):
+      with open(os.path.join(self.dst, "description"), "w") as fp:
+          fp.write(self.title)
+
+      with open(os.path.join(self.dst, "url"), "w") as fp:
+          fp.write(self.url)
+
+      self._deploy_kernel(idx)
+      self._deploy_syzkaller(idx)
+      self._deploy_gcc(idx)
+      self._deploy_report(idx)
+      if self.logs_flag:
+          self._deploy_all_logs()
+      else:
+          self._deploy_log(idx)
+
+  def deploy_allcases(self):
+      print("not implemented now")
+
+  def _deploy_kernel(self, idx, default=""):
+      if not default:
+          print("please set UPSTREAM_LINUX.")
+          exit(-1)
+      if self.cases[idx]['kernel'] == "upstream":
+          kernel = default
+          if not os.path.exists(kernel):
+              print('defalut kernel folder do not existed!')
+              exit(-1)
+          try:
+              res = subprocess.run(["cp", "-r", "{}".format(kernel),"{}".format(os.path.join(self.dst, "kernel"))], check=True, text=True, capture_output=True)
+          except subprocess.CalledProcessError as e:
+              print("subprocess failed ", e)
+              exit(-1)
+
+          if self.dst is not None:
+              req = requests.request(method='GET', url=self.cases[idx]['config'])
+              kernel = os.path.join(self.dst, "kernel")
+              with open(os.path.join(kernel, '.config'), 'wb') as fd:
+                  fd.write(req.text.encode())
+
+          os.chdir(os.path.join(self.dst, "kernel"))
+          os.system("git checkout -q " + self.cases[idx]['commit'])
+      elif self.cases[idx]['kernel'] == "net-next":
+          print("not implemented now")
+      else:
+          print("not implemented now")
+
+  def _deploy_syzkaller(self, idx, default=""):
+      if not default:
+          print("please set UPSTREAM_SYZKALLER.")
+          exit(-1)
+      syzkaller = default
+      if not os.path.exists(syzkaller):
+          print('defalut syzkaller folder do not existed!')
+          exit(-1)
+      try:
+          res = subprocess.run(["cp", "-r", "{}".format(syzkaller),"{}".format(os.path.join(self.dst, "syzkaller"))], check=True, text=True, capture_output=True)
+      except subprocess.CalledProcessError as e:
+          print("subprocess failed ", e)
+          exit(-1)
+
+      os.chdir(os.path.join(self.dst, "syzkaller"))
+      os.system("git checkout -q " + self.cases[idx]['syzkaller'])
+
+  def _deploy_gcc(self, idx):
+      """
+      gcc (Debian 12.2.0-14) 12.2.0
+      gcc (Debian 10.2.1-6) 10.2.1 20210110
+      Debian clang version 11.0.1-2
+      """
+      gcc = self.cases[idx]['gcc']
+      if gcc == "gcc (Debian 12.2.0-14) 12.2.0":
+          print("gcc12")
+      else:
+          print("not implemented now")
+
+  def deploy_clang(self, idx):
+      """
+      fuck
+      """
+      pass
+
+  def _deploy_report(self, idx):
+      req = requests.request(method='GET', url=self.cases[idx]['report'])
+      with open(os.path.join(self.dst, 'report'), "wb")as fd:
+          fd.write(req.text.encode())
+
+      syzkaller = os.path.join(os.path.dirname(self.dst), "syzkaller")
+
+  def _deploy_log(self, idx):
+      req = requests.request(method='GET', url=self.cases[idx]['log'])
+      with open(os.path.join(self.dst, 'log'), "wb") as fd:
+          fd.write(req.text.encode())
+
+  def _deploy_all_logs(self):
+      for idx, case in self.cases.items():
+          req = requests.request(method='GET', url=case['log'])
+          with open(os.path.join(self.dst, 'log{}'.format(idx)), "wb") as fd:
+              fd.write(req.text.encode())

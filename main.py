@@ -232,17 +232,16 @@ if __name__ == '__main__':
     print("[*] crawlering....")
     crawler.parse(hash)
     crawler.show()
-
-    # deployer = Deployer(crawler.cases)
-
+    which = int(input("chose one: "))
+    if which < len(crawler.cases):
+        crawler.deploy(which)
+    else:
+        print('fuck off. hacker!')
+    print("[*] crawler done")
     import ipdb; ipdb.set_trace();
-
-    # which = int(input("chose one: "))
-    # if which < len(crawler.cases):
-    #     crawler.deploy(which)
-    # else:
-    #     print('fuck off. hacker!')
-    # print("[*] crawler done")
+    print("[*] deplying")
+    deployer = Deployer(crawler.cases, index=which)
+    # print("[*] deployer done")
 
     # parallel_count = 0
     # manager = multiprocessing.Manager()
