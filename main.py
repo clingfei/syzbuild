@@ -5,17 +5,16 @@ import multiprocessing, threading
 import gc
 
 sys.path.append(os.getcwd())
-from modules import Crawler, Deployer
+from modules import Crawler,Deployer,Extracter
 from subprocess import call
 from modules.utilities import urlsOfCases, urlsOfCases, FOLDER, CASE
-
 
 def args_parse():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
                                      description='Deploy crash cases from syzbot\n')
     parser.add_argument('-u', '--url', nargs='?', action='store', help='the url for automatically crawling and building.\n'')')
     parser.add_argument('-d', '--dst', nargs='?', action='store', help='destination to store.\n'')')
-    parser.add_argument("--logs",   action="store_true", default=False, help="crawling all the logs from the url, default=false.\n")
+    parser.add_argument("--logs", action="store_true", default=False, help="crawling all the logs from the url, default=false.\n")
     parser.add_argument("--assets", action="store_true", default=False, help="crawling assets or not, default=false.\n")
     parser.add_argument('--install-requirements', action='store_true',  help='Install required packages and compile essential tools')
     parser.add_argument('--debug', action='store_true', help='enable debug mode')
@@ -206,8 +205,14 @@ if __name__ == '__main__':
     try:
         os.mkdir(args.dst)
     except FileExistsError:
-        print("{} existed, please check again".format(args.dst))
-        exit(-1)
+        co = input("{} existed, please check and continue. y/n ?\n".format(args.dst))
+        if co == "y":
+            pass
+        elif co == "n":
+            pass
+        else:
+            print('input error! get out.')
+            exit(-1)
     except PermissionError:
         print("{} permissing error, please check again".format(args.dst))
         exit(-1)
@@ -228,12 +233,16 @@ if __name__ == '__main__':
     crawler.parse(hash)
     crawler.show()
 
-    which = int(input("chose one: "))
-    if which < len(crawler.cases):
-        crawler.deploy(which)
-    else:
-        print('fuck off. hacker!')
-    print("[*] crawler done")
+    # deployer = Deployer(crawler.cases)
+
+    import ipdb; ipdb.set_trace();
+
+    # which = int(input("chose one: "))
+    # if which < len(crawler.cases):
+    #     crawler.deploy(which)
+    # else:
+    #     print('fuck off. hacker!')
+    # print("[*] crawler done")
 
     # parallel_count = 0
     # manager = multiprocessing.Manager()
@@ -255,6 +264,9 @@ if __name__ == '__main__':
     # bullseye disk
     """
     bullseye = os.path.join(dir(args.dst))
+    os.system("cp -r {} .".format(),)
+
+    bookworm = os.path.join(dir(args.dst))
     os.system("cp -r {} .".format(),)
     """
 

@@ -2,10 +2,8 @@ import requests
 import logging
 import subprocess
 import os, sys
-import re
 from modules.utilities import request_get, extract_vul_obj_offset_and_size, regx_get
 from bs4 import BeautifulSoup
-from bs4 import element
 from prettytable import PrettyTable
 
 syzbot_host_url = "https://syzkaller.appspot.com/"
@@ -161,9 +159,12 @@ class Crawler():
 
         self.cases[idx]["kernel"] = None
         self.cases[idx]["commit"] = None
+        self.cases[idx]["is_upstream"] = False
         self.cases[idx]["syzkaller"] = None
         self.cases[idx]["config"] = None
         self.cases[idx]["gcc"] = None
+        self.cases[idx]['clang'] = None
+        self.cases[idx]['version'] = None
         self.cases[idx]["log"] = None
         self.cases[idx]["report"] = None
         self.cases[idx]["syz"] = None
@@ -183,9 +184,15 @@ class Crawler():
             self.cases[idx]['kernel'] = kernel
             print("[+] kernel: ", kernel)
 
+        if self.cases[idx]['kernel'] == "upstream":
+            self.cases[idx]["is_upstream"] = True
+
     def __parse_commit_from_case(self, idx, case):
         cols = case.find_all("td", {"class": "tag"})
-        commits = cols[0].contents[0].contents[0]
+        if self.cases[idx]['is_upstream']:
+            commits = cols[0].contents[0].contents[0]
+        else:
+            commits = cols[0].contents[0].attrs['href']
         syzkaller = cols[1].contents[0].contents[0]
         if commits is None or syzkaller is None:
             print("[-] Warning: commits or syzkaller is none in url: {}".format(self.url))
@@ -205,7 +212,7 @@ class Crawler():
             config = prefix + config.contents[0].attrs['href']
             self.cases[idx]['config'] = config
             print("[+] config: ", config)
-            self.__parse_gcc_version_from_config(idx, config)
+            self.__parse_compiler_version_from_config(idx, config)
             # if self.dst is not None:
             #     req = requests.request(method='GET', url=new_url)
             #     with os.open(os.path.join(self.dst, 'config'), os.O_RDWR | os.O_CREAT) as fd:
@@ -260,133 +267,43 @@ class Crawler():
             self.cases[idx]['manager'] = manager
             print("[+] manager: ", manager)
 
-    def __parse_gcc_version_from_config(self, idx, config):
+    def __parse_compiler_version_from_config(self, idx, config):
         req = requests.request(method='GET', url=config).text.encode()
         start = req.find(b"CONFIG_CC_VERSION_TEXT=") + len("CONFIG_CC_VERSION_TEXT=")
         if start != -1:
             end = req.find(b"\n", start)
         if end != -1:
-            gcc = req[start+1:end-1]
-            self.cases[idx]['gcc'] = gcc.decode("utf-8")
+            compiler = req[start+1:end-1].decode('utf-8')
+            import ipdb; ipdb.set_trace();
+            if "gcc" in compiler:
+                version = compiler.strip().split(' ')[-1]
+                self.cases[idx]['version'] = int(version.split('.')[0])
+                self.cases[idx]['gcc'] = "gcc " + version
+            elif "clang" in compiler:
+                version = compiler.strip().split(' ')[-1]
+                self.cases[idx]['version'] = int(version.split('.')[0])
+                self.cases[idx]['clang'] = "clang "+ version
+            else:
+                # FIXME: when it's not clang or gcc, will crash in show() function
+                print("do not support this compiler")
         else:
             print("[-] Warning: can not found gcc version in config")
 
     def show(self):
         table = PrettyTable()
-        table.field_names = ["idx", "kernel", "commit", "syzkaller", "gcc", "syz", "cpp", "manager"]
+        table.field_names = ["idx", "kernel", "syzkaller", "compiler", "syz", "cpp", "manager"]
         # for idx, case in self.cases:
         for idx, case in self.cases.items():
+            import ipdb;ipdb.set_trace();
             table.add_row([str(idx),
                            str(case["kernel"]),
-                           str(case["commit"]),
                            str(case["syzkaller"]),
-                           str(case["gcc"]),
+                           str(case["gcc"]) if case["gcc"] else str(case["clang"]),
                            "True" if case["syz"] else "None",
                            "True" if case["cpp"] else "None",
                            str(case["manager"])
                            ])
         table.title = self.title
-        # print(self.title)
         print(table)
 
-    # chose one
-    def deploy(self, idx):
-        with open(os.path.join(self.dst, "description"), "w") as fp:
-            fp.write(self.title)
 
-        with open(os.path.join(self.dst, "url"), "w") as fp:
-            fp.write(self.url)
-
-        self._deploy_kernel(idx)
-        self._deploy_syzkaller(idx)
-        self._deploy_gcc(idx)
-        self._deploy_report(idx)
-        if self.logs_flag:
-            self._deploy_all_logs()
-        else:
-            self._deploy_log(idx)
-
-    def deploy_allcases(self):
-        print("not implemented now")
-
-    def _deploy_kernel(self, idx, default=UPSTREAM_LINUX):
-        if not default:
-            print("please set UPSTREAM_LINUX.")
-            exit(-1)
-        if self.cases[idx]['kernel'] == "upstream":
-            kernel = default
-            if not os.path.exists(kernel):
-                print('defalut kernel folder do not existed!')
-                exit(-1)
-
-            try:
-                res = subprocess.run(["cp", "-r", "{}".format(kernel),"{}".format(os.path.join(self.dst, "kernel"))], check=True, text=True, capture_output=True)
-            except subprocess.CalledProcessError as e:
-                print("subprocess failed ", e)
-                exit(-1)
-
-            if self.dst is not None:
-                req = requests.request(method='GET', url=self.cases[idx]['config'])
-                kernel = os.path.join(self.dst, "kernel")
-                with open(os.path.join(kernel, '.config'), 'wb') as fd:
-                    fd.write(req.text.encode())
-
-            os.chdir(os.path.join(self.dst, "kernel"))
-            os.system("git checkout -q " + self.cases[idx]['commit'])
-        elif self.cases[idx]['kernel'] == "net-next":
-            print("not implemented now")
-        else:
-            print("not implemented now")
-
-    def _deploy_syzkaller(self, idx, default=UPSTREAM_SYZKALLER):
-        if not default:
-            print("please set UPSTREAM_SYZKALLER.")
-            exit(-1)
-        syzkaller = default
-        if not os.path.exists(syzkaller):
-            print('defalut syzkaller folder do not existed!')
-            exit(-1)
-        try:
-            res = subprocess.run(["cp", "-r", "{}".format(syzkaller),"{}".format(os.path.join(self.dst, "syzkaller"))], check=True, text=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            print("subprocess failed ", e)
-            exit(-1)
-
-        os.chdir(os.path.join(self.dst, "syzkaller"))
-        os.system("git checkout -q " + self.cases[idx]['syzkaller'])
-
-    def _deploy_gcc(self, idx):
-        """
-        gcc (Debian 12.2.0-14) 12.2.0
-        gcc (Debian 10.2.1-6) 10.2.1 20210110
-        Debian clang version 11.0.1-2
-        """
-        gcc = self.cases[idx]['gcc']
-        if gcc == "gcc (Debian 12.2.0-14) 12.2.0":
-            print("gcc12")
-        else:
-            print("not implemented now")
-
-    def deploy_clang(self, idx):
-        """
-        fuck
-        """
-        pass
-
-    def _deploy_report(self, idx):
-        req = requests.request(method='GET', url=self.cases[idx]['report'])
-        with open(os.path.join(self.dst, 'report'), "wb")as fd:
-            fd.write(req.text.encode())
-
-        syzkaller = os.path.join(os.path.dirname(self.dst), "syzkaller")
-
-    def _deploy_log(self, idx):
-        req = requests.request(method='GET', url=self.cases[idx]['log'])
-        with open(os.path.join(self.dst, 'log'), "wb") as fd:
-            fd.write(req.text.encode())
-
-    def _deploy_all_logs(self):
-        for idx, case in self.cases.items():
-            req = requests.request(method='GET', url=case['log'])
-            with open(os.path.join(self.dst, 'log{}'.format(idx)), "wb") as fd:
-                fd.write(req.text.encode())
