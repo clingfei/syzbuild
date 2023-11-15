@@ -202,7 +202,7 @@ if __name__ == '__main__':
         exit(-1)
 
     # NOTE: checking and building workdir
-    args.dst = os.path.join(args.dst+ hash[:8])
+    args.dst = os.path.join(args.dst, hash[:8])
     try:
         os.mkdir(args.dst)
     except FileExistsError:
