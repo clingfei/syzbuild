@@ -5,9 +5,12 @@ import multiprocessing, threading
 import gc
 
 sys.path.append(os.getcwd())
-from modules import Crawler,Deployer,Extracter
 from subprocess import call
 from modules.utilities import urlsOfCases, urlsOfCases, FOLDER, CASE
+from modules import Datastorer
+from modules.crawler import Crawler
+from modules.deployer import Deployer
+from modules.extracter import Extracter
 
 def args_parse():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
@@ -195,7 +198,7 @@ if __name__ == '__main__':
             url_flag = 1
         else:
             print("url format not support")
-            exit(-1)
+            url_flag = 2
     else:
         print("must provide a valid url!")
         exit(-1)
@@ -205,7 +208,7 @@ if __name__ == '__main__':
     try:
         os.mkdir(args.dst)
     except FileExistsError:
-        co = input("{} existed, please check and continue. y/n ?\n".format(args.dst))
+        co = input("{} existed, please check and continue.(y/n) ?\n".format(args.dst))
         if co == "y":
             pass
         elif co == "n":
@@ -227,21 +230,20 @@ if __name__ == '__main__':
         # print("whatever failed in mkdir {}",args.dst)
         # os.system("rm -rf {}".format(args.dst))
         # exit(-1)
-
-    crawler = Crawler(args.dst, args.url, url_flag, logs_flag=True)
+    data = Datastorer()
+    crawler = Crawler(data, args.url, url_flag, logs_flag=True)
     print("[*] crawlering....")
     crawler.parse(hash)
     crawler.show()
+    print("[*] crawling done")
     which = int(input("chose one: "))
-    if which < len(crawler.cases):
-        crawler.deploy(which)
+    if which < len(data.cases):
+        print("[*] deplying")
+        import ipdb; ipdb.set_trace();
+        deployer = Deployer(data.cases, args.dst, index=which)
+        print("[*] deploying done")
     else:
         print('fuck off. hacker!')
-    print("[*] crawler done")
-    import ipdb; ipdb.set_trace();
-    print("[*] deplying")
-    deployer = Deployer(crawler.cases, index=which)
-    # print("[*] deployer done")
 
     # parallel_count = 0
     # manager = multiprocessing.Manager()
