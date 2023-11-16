@@ -25,7 +25,6 @@ class Extracter():
     # all the progs
     self.progs = []
 
-    import ipdb; ipdb.set_trace();
     if os.path.isabs(self.folder):
         self.folder = os.path.abspath(self.folder)
 

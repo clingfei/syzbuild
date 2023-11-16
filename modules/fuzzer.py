@@ -1,6 +1,8 @@
-import os
+import os,sys
 import subprocess
 import logging
+
+from modules import Datastorer
 
 class Fuzzer():
 

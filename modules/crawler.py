@@ -14,30 +14,12 @@ supports = {
     1: syzbot_bug_ext_url
 }
 
-UPSTREAM_LINUX = os.environ.get('UPSTREAM_LINUX')
-UPSTREAM_SYZKALLER = os.environ.get('UPSTREAM_SYZKALLER')
-GCC8 = os.environ.get("GCC8")
-GCC9 = os.environ.get("GCC9")
-GCC10 = os.environ.get("GCC10")
-GCC11 = os.environ.get("GCC11")
-GCC12 = os.environ.get("GCC12")
-CLANG8 = os.environ.get("CLANG8")
-CLANG9 = os.environ.get("CLANG9")
-CLANG10 = os.environ.get("CLANG10")
-CLANG11 = os.environ.get("CLANG11")
-CLANG12 = os.environ.get("CLANG12")
-CLANG13 = os.environ.get("CLANG13")
-CLANG14 = os.environ.get("CLANG14")
-CLANG15 = os.environ.get("CLANG15")
-CLANG16 = os.environ.get("CLANG16")
-CLANG17 = os.environ.get("CLANG17")
 
 class Crawler():
     def __init__(self,
                  data,
                  url,
                  type,
-                 logs_flag = False,
                  debug = False):
 
         if not isinstance(data, Datastorer):
@@ -67,11 +49,11 @@ class Crawler():
             self.logger.propagate = False
         self.logger.addHandler(handler)
 
-    def parse(self, hash):
+    def parse(self):
         try:
             bug_url = supports[self.type]
             self.logger.debug("{}{}{}".format(syzbot_host_url, bug_url, hash))
-            url = syzbot_host_url + bug_url + hash
+            url = syzbot_host_url + bug_url + self.data.hash
             if url != self.data.url:
                 print("cheking url failed!\n")
                 exit(-1)
@@ -79,7 +61,7 @@ class Crawler():
             print("url not support")
             return
 
-        if hash is not None:
+        if self.data.hash is not None:
             req = requests.request(method='GET', url=url)
             self.soup = BeautifulSoup(req.text, "html.parser")
             if not self.soup:

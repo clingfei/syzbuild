@@ -12,12 +12,18 @@ import modules.utilities as utilities
 from modules.utilities import chmodX
 from subprocess import call, Popen, PIPE, STDOUT
 from dateutil import parser as time_parser
+from urllib.parse import urljoin,urlparse
 
-from modules.crawler import syzbot_host_url, syzbot_bug_base_url
+from modules import Datastorer
 
 stamp_build_syzkaller = "BUILD_SYZKALLER"
 stamp_build_kernel = "BUILD_KERNEL"
 stamp_reproduce_ori_poc = "REPRO_ORI_POC"
+
+supports_compiler = {
+    0: "gcc",
+    1: "clang"
+}
 
 syz_config_template="""
 {{
@@ -46,7 +52,7 @@ syz_config_template="""
 }}"""
 
 class Deployer():
-  def __init__(self, info, index=0, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700, debug=False, ):
+  def __init__(self, data, dst, index=0, force=False, max=-1, parallel_max=-1, port=53777, time=8, kernel_fuzzing=False, gdb_port=1235, qemu_monitor_port=9700, debug=False, logs=True):
     """
     deployer environment
     index: table中的第几个,默认是第0个,因为其他的还没有实现
@@ -54,7 +60,17 @@ class Deployer():
     force: 是否重新clone/build
     max: 编译时候使用的核心最多
     """
-    self.cases= info
+    if not isinstance(data, Datastorer):
+      print("data format can't support!")
+      exit(-1)
+
+    self.data = data
+    self.dst = dst
+
+    # flags
+    # logs all logs for only one
+    self.debug = debug
+    self.logs = logs
 
     """
     config file in one machine
@@ -62,8 +78,8 @@ class Deployer():
     """
     self.config = None
 
-    self.index = index
-    self.debug = debug
+    self.idx = index
+
     self.force= force
     self.image_switching_date = datetime.datetime(2020, 3, 15)
     self.catalog = 'incomplete'
@@ -75,9 +91,8 @@ class Deployer():
     #   self.max = 8
     self.max = -1
 
-    self.init_logger()
+    self.init_logger(self.data.hash[:8])
     self.deploy()
-
 
   def init_logger(self, hash_val=None):
     self.logger = logging.getLogger(__name__)
@@ -97,13 +112,22 @@ class Deployer():
       self.logger.setLevel(logging.INFO)
       self.logger.propagate = False
 
-  def setup_hash(self, hash_val):
-    self.hash_val = hash_val
-    self.init_logger(self.hash_val[:7])
-
   def __check_stamp(self, name, hash_val, folder):
     stamp_path1 = "{}/work/{}/{}/.stamp/{}".format(self.project_path, folder, hash_val, name)
     return os.path.isfile(stamp_path1)
+
+  def check_operation(self):
+    with os.popen('cat /etc/os-release') as f:
+      os_info = f.read()
+
+    if 'Fedora' in os_info:
+        return "fedora"
+    elif 'Ubuntu' in os_info:
+        return "ubuntu"
+    elif 'Debian' in os_info:
+        return "debian"
+    else:
+        return "unknown"
 
   def reproduced_ori_poc(self, hash_val, folder):
     return self.__check_stamp(stamp_reproduce_ori_poc, hash_val[:7], folder)
@@ -121,8 +145,7 @@ class Deployer():
   #       compiler=self.compiler,
   #       max_compiling_kernel=self.max_compiling_kernel)
 
-  def deployhello(self, hash_val, case):
-    self.setup_hash(hash_val)
+  def __deploy_syzkaller_config(self, hash_val, case):
     self.project_path = os.getcwd()
     self.package_path = os.path.join(self.project_path)
     self.current_case_path = "{}/work/{}/{}".format(self.project_path, self.catalog, hash_val[:7])
@@ -487,7 +510,7 @@ class Deployer():
     self.logger.info("run: scripts/linux-clone.sh {} {}".format(self.linux_addr, self.kernel_path))
     call(["scripts/linux-clone.sh", self.linux_addr, self.kernel_path])
 
-  def __run_delopy_script(self, hash_val, case):
+  def __delopy_script(self, hash_val, case):
     commit = case["commit"]
     syzkaller = case["syzkaller"]
     config = case["config"]
@@ -897,54 +920,182 @@ class Deployer():
       return res
 
   # chose one
-  def deploy(self, idx):
-      with open(os.path.join(self.dst, "description"), "w") as fp:
-          fp.write(self.title)
+  def deploy(self):
+    LINUX = ""
+    SYZKALLER = ""
+    if self.data.cases[self.idx]['kernel'] == "upstream":
+      try:
+        LINUX = os.environ['LINUX']
+      except KeyError:
+        LINUX = input("please set upstream linux path:\n")
 
-      with open(os.path.join(self.dst, "url"), "w") as fp:
-          fp.write(self.url)
+    try:
+      SYZKALLER = os.environ['SYZKALLER']
+    except KeyError:
+      SYZKALLER = input("please set upstream syzkaller path:\n")
 
-      self._deploy_kernel(idx)
-      self._deploy_syzkaller(idx)
-      self._deploy_gcc(idx)
-      self._deploy_report(idx)
-      if self.logs_flag:
-          self._deploy_all_logs()
-      else:
-          self._deploy_log(idx)
+    # TODO: judge the compiler version and get the compiler path
+    compiler = 0
+    if self.data.cases[self.idx]['gcc']:
+      compiler = 0
+    elif self.data.cases[self.idx]['clang']:
+      compiler = 1
+    else:
+      print("failed to find compiler")
+      exit(-1)
+
+    if not compiler:
+      find = supports_compiler[0].upper()+ self.data.cases[self.idx]['version']
+      GCC = os.environ.get(find)
+    else:
+      find = supports_compiler[1].upper()+ self.data.cases[self.idx]['version']
+      CLANG = os.environ.get(clang)
+
+
+    # GCC8 = os.environ.get("GCC8")
+    # GCC9 = os.environ.get("GCC9")
+    # GCC10 = os.environ.get("GCC10")
+    # GCC11 = os.environ.get("GCC11")
+    # GCC12 = os.environ.get("GCC12")
+    # CLANG8 = os.environ.get("CLANG8")
+    # CLANG9 = os.environ.get("CLANG9")
+    # CLANG10 = os.environ.get("CLANG10")
+    # CLANG11 = os.environ.get("CLANG11")
+    # CLANG12 = os.environ.get("CLANG12")
+    # CLANG13 = os.environ.get("CLANG13")
+    # CLANG14 = os.environ.get("CLANG14")
+    # CLANG15 = os.environ.get("CLANG15")
+    # CLANG16 = os.environ.get("CLANG16")
+    # CLANG17 = os.environ.get("CLANG17")
+
+    PATCH = os.environ.get("PATCH")
+    if PATCH:
+      # TODO: choice the patch path
+      pass
+
+    with open(os.path.join(self.dst, "description"), "w") as fp:
+      fp.write(self.data.title)
+
+    with open(os.path.join(self.dst, "url"), "w") as fp:
+      fp.write(self.data.url)
+
+    # deploying
+    # import ipdb; ipdb.set_trace();
+    os.chdir(self.dst)
+    self.__deploy_kernel(default=LINUX)
+    self.__deploy_patch(default=PATCH)
+
+    self.__compile_kernel()
+    self.__deploy_syzkaller(default=SYZKALLER)
+
+    if not compiler:
+      self.__deploy_gcc(default=GCC)
+    else:
+      self.__deploy_clang(default=CLANG)
+    self.__deploy_report()
+
+    self.__deploy_disk()
+
+    if self.logs_flag:
+      self._deploy_all_logs()
+    else:
+      self._deploy_log()
 
   def deploy_allcases(self):
-      print("not implemented now")
+    print("not implemented now")
 
-  def _deploy_kernel(self, idx, default=""):
-      if not default:
-          print("please set UPSTREAM_LINUX.")
-          exit(-1)
-      if self.cases[idx]['kernel'] == "upstream":
-          kernel = default
-          if not os.path.exists(kernel):
-              print('defalut kernel folder do not existed!')
-              exit(-1)
-          try:
-              res = subprocess.run(["cp", "-r", "{}".format(kernel),"{}".format(os.path.join(self.dst, "kernel"))], check=True, text=True, capture_output=True)
-          except subprocess.CalledProcessError as e:
-              print("subprocess failed ", e)
-              exit(-1)
+  def __deploy_kernel(self, default=""):
+    """
+    default: the path of existed upstream linux for saving time
+    """
+    if not default:
+      print("maybe not UPSTREAM_LINUX.")
 
-          if self.dst is not None:
-              req = requests.request(method='GET', url=self.cases[idx]['config'])
-              kernel = os.path.join(self.dst, "kernel")
-              with open(os.path.join(kernel, '.config'), 'wb') as fd:
-                  fd.write(req.text.encode())
+    if self.data.cases[self.idx]['kernel'] == "upstream":
+      kernel = default
+      if not os.path.exists(kernel):
+        print('defalut kernel folder do not existed!')
+        exit(-1)
 
-          os.chdir(os.path.join(self.dst, "kernel"))
-          os.system("git checkout -q " + self.cases[idx]['commit'])
-      elif self.cases[idx]['kernel'] == "net-next":
-          print("not implemented now")
-      else:
-          print("not implemented now")
+      try:
+        res = subprocess.run(["cp", "-r", "{}".format(kernel),"{}".format(os.path.join(self.dst, "kernel"))],
+                             check=True,
+                             text=True,
+                             capture_output=True)
+        # 访问返回码
+        # returncode = res.returncode
+        # print(f"返回码：{returncode}")
 
-  def _deploy_syzkaller(self, idx, default=""):
+        # 访问标准输出和标准错误
+        # stdout = res.stdout
+        # stderr = res.stderr
+        # print(f"标准输出：{stdout}")
+        # print(f"标准错误：{stderr}")
+
+      except subprocess.CalledProcessError as e:
+        print("subprocess failed ", e)
+        exit(-1)
+
+      if self.dst is not None:
+        req = requests.request(method='GET', url=self.data.cases[self.idx]['config'])
+        kernel = os.path.join(self.dst, "kernel")
+        with open(os.path.join(kernel, '.config'), 'wb') as fd:
+          fd.write(req.text.encode())
+
+      os.chdir(os.path.join(self.dst, "kernel"))
+      os.system("git checkout -q " + self.data.cases[self.idx]['commit'])
+    elif self.data.cases[self.idx]['kernel'] == "net-next":
+      # git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git/snapshot/net-next-55c900477f5b3897d9038446f72a281cae0efd86.tar.gz
+      snapshot = "https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git/snapshot/"
+      commit = urlparse(self.data.cases[self.idx]['commit']).query.strip("id=")
+      url = urljoin(snapshot, "net-next-"+commit+".tar.gz")
+      print(url)
+    elif self.data.cases[self.idx]['kernel'] == "linux-next":
+      # git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git/snapshot/linux-next-715abedee4cd660ad390659aefa7482f05275bbd.tar.gz
+      snapshot = "https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git/snapshot/"
+      commit = urlparse(self.data.cases[self.idx]['commit']).query.strip("id=")
+      url = urljoin(snapshot, "linux-next-"+commit+".tar.gz")
+    else:
+      print("not implemented now, do not support this kernel.")
+      exit(-1)
+
+    kernel_dst = os.path.join(self.dst, "kernel.tar.gz")
+    # with open(os.path.join(self.dst, "kernel.tar.gz"), 'wb') as fd:
+    if os.path.exists(kernel_dst):
+      co = input("kernel.tar.gz existed. Redownloading? (y/n) ?\n")
+      if co == "y":
+        self.__download_file(url, kernel_dst)
+    else:
+      self.__download_file(url, kernel_dst)
+    # whatever extract it
+    try:
+      os.mkdir(os.path.join(self.dst, "kernel"))
+    except FileExistsError:
+      pass
+
+    import ipdb; ipdb.set_trace()
+    ignore = os.system("tar xvf kernel.tar.gz -C kernel")
+    if ignore:
+      print('please check kernel.tar.gz')
+      exit(-1)
+
+  def __compile_kernel(self):
+    pass
+
+  def __download_file(self, url, dst):
+    from tqdm import tqdm
+    with requests.get(url, stream=True) as r:
+      r.raise_for_status()
+      total_size_in_bytes = int(r.headers.get('content-length', 0))
+      block_size = 1024 # 1 Kibibyte
+      progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True)
+      with open(dst, 'wb') as file:
+        for data in r.iter_content(block_size):
+          progress_bar.update(len(data))
+          file.write(data)
+      progress_bar.close()
+
+  def __deploy_syzkaller(self, default=""):
       if not default:
           print("please set UPSTREAM_SYZKALLER.")
           exit(-1)
@@ -959,40 +1110,45 @@ class Deployer():
           exit(-1)
 
       os.chdir(os.path.join(self.dst, "syzkaller"))
-      os.system("git checkout -q " + self.cases[idx]['syzkaller'])
+      os.system("git checkout -q " + self.data.cases[self.idx]['syzkaller'])
 
-  def _deploy_gcc(self, idx):
+  def __deploy_gcc(self):
       """
       gcc (Debian 12.2.0-14) 12.2.0
       gcc (Debian 10.2.1-6) 10.2.1 20210110
       Debian clang version 11.0.1-2
       """
-      gcc = self.cases[idx]['gcc']
+      gcc = self.data.cases[self.idx]['gcc']
       if gcc == "gcc (Debian 12.2.0-14) 12.2.0":
           print("gcc12")
       else:
           print("not implemented now")
 
-  def deploy_clang(self, idx):
+  def __deploy_clang(self):
       """
       fuck
       """
       pass
 
-  def _deploy_report(self, idx):
-      req = requests.request(method='GET', url=self.cases[idx]['report'])
+  def __deploy_report(self):
+      req = requests.request(method='GET', url=self.data.cases[self.idx]['report'])
       with open(os.path.join(self.dst, 'report'), "wb")as fd:
           fd.write(req.text.encode())
 
       syzkaller = os.path.join(os.path.dirname(self.dst), "syzkaller")
 
-  def _deploy_log(self, idx):
-      req = requests.request(method='GET', url=self.cases[idx]['log'])
+  def __deploy_log(self):
+      req = requests.request(method='GET', url=self.data.cases[self.idx]['log'])
       with open(os.path.join(self.dst, 'log'), "wb") as fd:
           fd.write(req.text.encode())
 
-  def _deploy_all_logs(self):
-      for idx, case in self.cases.items():
+  def __deploy_all_logs(self):
+      for self.idx, case in self.data.cases.items():
           req = requests.request(method='GET', url=case['log'])
-          with open(os.path.join(self.dst, 'log{}'.format(idx)), "wb") as fd:
+          with open(os.path.join(self.dst, 'log{}'.format(self.idx)), "wb") as fd:
               fd.write(req.text.encode())
+
+  def __deploy_disk(self, default=""):
+    # os.system()
+    pass
+

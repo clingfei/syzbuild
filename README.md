@@ -23,8 +23,9 @@ portpicker
 ```shell
 python3 main.py -u https://syzkaller.appspot.com/bug\?extid\=0b7937459742a0a4cffd -d /home/spark/foobar/
 ```
+
 最好挂上代理，不然clone不下来
-成功将会在``下生成所有上述所需
+成功将会在下生成所有上述所需
 如果需要deploy环境，注意需要设置如下环境变量为本地路径
 
 ```shell

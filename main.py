@@ -231,16 +231,16 @@ if __name__ == '__main__':
         # os.system("rm -rf {}".format(args.dst))
         # exit(-1)
     data = Datastorer()
-    crawler = Crawler(data, args.url, url_flag, logs_flag=True)
+    data.hash = hash
+    crawler = Crawler(data, args.url, url_flag)
     print("[*] crawlering....")
-    crawler.parse(hash)
+    crawler.parse()
     crawler.show()
     print("[*] crawling done")
     which = int(input("chose one: "))
     if which < len(data.cases):
         print("[*] deplying")
-        import ipdb; ipdb.set_trace();
-        deployer = Deployer(data.cases, args.dst, index=which)
+        deployer = Deployer(data, args.dst, index=which, logs=True)
         print("[*] deploying done")
     else:
         print('fuck off. hacker!')
